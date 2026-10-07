@@ -1,0 +1,14 @@
+//unlimited message
+message: "Price varies based on the number of students"
+
+
+// from paystack  
+This is the part I think you should investigate seriously.
+
+Paystack's current documentation specifically says:
+
+Transaction fees for schools or educational institutions are 0.7%, capped at ₦1,500 for local card payments. For all other payment methods, they charge a flat ₦300.
+
+And Paystack explicitly mentions school administrators and people building school-management platforms in this educational pricing section. They say you should notify them through their process if you intend to use Paystack for a school.
+
+That is extremely relevant to ScholarNode.
