@@ -1,12 +1,46 @@
 import express from "express";
-import { loginUser, forgotLoginId, forgotPassword, resetPassword, requestNewAccessToken } from "../controllers/auth.js";
+import {
+  loginUser,
+  getLoggedInUser,
+  forgotLoginId,
+  forgotPassword,
+  resetPassword,
+  requestNewAccessToken,
+} from "../controllers/auth.js";
+import { protectRoutes } from "../middleware/auth.js";
+import validate from "../middleware/validation.js";
+import {
+  loginValidationSchema,
+  forgotLoginIdValidationSchema,
+  forgotPasswordValidationSchema,
+  resetPasswordValidationSchema,
+} from "../validation/auth.js";
 
 const router = express.Router();
 
-router.post("/login", loginUser);
-router.post("/forgot-login-id", forgotLoginId);
+// Current logged-in user profile
+router.get("/me", protectRoutes, getLoggedInUser);
+router.get("/logged-in-user", protectRoutes, getLoggedInUser);
 
-router.post("/forgot-password", forgotPassword);
-router.post("/reset-password", resetPassword);
-router.post('/refresh-token', requestNewAccessToken);
+// Login and token refresh
+router.post("/login", validate(loginValidationSchema, "body"), loginUser);
+router.post("/refresh-token", requestNewAccessToken);
+
+// Password and Login ID recovery
+router.post(
+  "/forgot-login-id",
+  validate(forgotLoginIdValidationSchema, "body"),
+  forgotLoginId
+);
+router.post(
+  "/forgot-password",
+  validate(forgotPasswordValidationSchema, "body"),
+  forgotPassword
+);
+router.post(
+  "/reset-password",
+  validate(resetPasswordValidationSchema, "body"),
+  resetPassword
+);
+
 export default router;

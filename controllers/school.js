@@ -8,6 +8,8 @@ import School from '../models/School.js';
 import User from '../models/User.js';
 import Session from "../models/Session.js";
 import Term from "../models/Term.js";
+import Class from "../models/Class.js";
+import Subject from "../models/Subject.js";
 import Owner from "../models/Owner.js";
 import VerificationCode from "../models/VerificationCode.js";
 import sendEmail from '../config/emailService.js';
@@ -17,6 +19,7 @@ import { Op } from 'sequelize';
 import { dbConnection } from "../config/db.js";
 
 import pricingConfig from '../config/pricing.js';
+import generateStaffLoginId from '../services/generateStaffLoginId.js';
 import AppError from '../utils/AppError.js';
 import generateExpiryTime from '../utils/experyTime.js';
 import generateVerificationCode from '../utils/verificationCode.js';
@@ -28,13 +31,6 @@ export const checkSchoolCode = async (req, res, next) => {
   try {
     const schoolCode = req.query.schoolCode?.trim();
     console.log('Checking school code availability:', schoolCode);
-
-    if (!schoolCode) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'schoolCode is required.',
-      });
-    }
 
     const school = await School.findOne({ where: { schoolCode } });
 
@@ -72,20 +68,6 @@ export const registerSchool = async (req, res, next) => {
     console.log('Admin data:', adminData);
     console.log('Plan data:', planData);
 
-    // =========================================================
-    // 1. BASIC REQUEST VALIDATION
-    // =========================================================
-
-    if (!schoolData || !adminData || !planData) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Missing required fields: school, admin, and plan are required.",
-      });
-    }
-
     const {
       schoolName,
       schoolCode,
@@ -109,41 +91,7 @@ export const registerSchool = async (req, res, next) => {
     } = planData;
 
     // =========================================================
-    // 2. VALIDATE SCHOOL FIELDS
-    // =========================================================
-
-    if (
-      !schoolName ||
-      !schoolCode ||
-      !address ||
-      !schoolLevel ||
-      !ownershipType
-    ) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Missing required school fields: schoolName, schoolCode, address, schoolLevel, ownershipType",
-      });
-    }
-
-    // =========================================================
-    // 3. VALIDATE USER FIELDS
-    // =========================================================
-
-    if (!firstName || !surName || !userEmail || !password || !role) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Missing required user fields: firstName, surName, email, password, role",
-      });
-    }
-
-    // =========================================================
-    // 4. NORMALIZE VALUES
+    // NORMALIZE VALUES
     // =========================================================
 
     const normalizedSchoolName = schoolName.trim();
@@ -154,77 +102,28 @@ export const registerSchool = async (req, res, next) => {
     const normalizedSchoolLevel = schoolLevel.trim().toUpperCase();
     const normalizedOwnershipType = ownershipType.trim().toUpperCase();
     const normalizedRole = role.trim().toUpperCase();
-    const roleAliases = {
-      VICE_LEADER: "VICE",
-    };
-    const databaseRole = roleAliases[normalizedRole] || normalizedRole;
+    const allowedRegistrationRoles = [
+      "LEADER",
+      "VICE_LEADER",
+      "ADMINISTRATOR",
+      "EXAM_OFFICER",
+      "STAFF",
+    ];
+
+    if (!allowedRegistrationRoles.includes(normalizedRole)) {
+      await transaction.rollback();
+
+      return res.status(400).json({
+        status: "error",
+        message: `Invalid role. Allowed values: ${allowedRegistrationRoles.join(", ")}.`,
+      });
+    }
+
+    const databaseRole = normalizedRole;
     const normalizedPlan = plan?.trim().toUpperCase();
 
     // =========================================================
-    // 5. VALIDATE SCHOOL LEVEL
-    // =========================================================
-
-    const allowedSchoolLevels = [
-      "PRIMARY",
-      "SECONDARY",
-      "COMBINED",
-    ];
-
-    if (!allowedSchoolLevels.includes(normalizedSchoolLevel)) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Invalid school level. Allowed values: PRIMARY, SECONDARY, COMBINED.",
-      });
-    }
-
-    // =========================================================
-    // 6. VALIDATE OWNERSHIP TYPE
-    // =========================================================
-
-    const allowedOwnershipTypes = [
-      "GOVERNMENT",
-      "PRIVATE",
-    ];
-
-    if (!allowedOwnershipTypes.includes(normalizedOwnershipType)) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Invalid ownership type. Allowed values: GOVERNMENT, PRIVATE.",
-      });
-    }
-
-    // =========================================================
-    // 7. VALIDATE PLAN
-    // =========================================================
-
-    if (!normalizedPlan) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message: "Plan is required.",
-      });
-    }
-
-    if (!pricingConfig[normalizedPlan]) {
-      await transaction.rollback();
-
-      return res.status(400).json({
-        status: "error",
-        message: `Invalid plan. Available plans: ${Object.keys(
-          pricingConfig
-        ).join(", ")}`,
-      });
-    }
-
-    // =========================================================
-    // 8. VALIDATE TIER / BILLING CYCLE
+    // VALIDATE TIER / BILLING CYCLE
     // =========================================================
 
     let planPrice = null;
@@ -417,39 +316,11 @@ export const registerSchool = async (req, res, next) => {
       }
     );
 
-    // =========================================================
-    // 13. GENERATE LOGIN ID
-    // =========================================================
-    //
-    // Format:
-    //
-    // ABC/STF/0001
-    //
-    // First 3 characters of school code
-    // + STF
-    // + 4-digit serial number
-    //
-    // Since this is the first user for a newly-created school,
-    // the serial will normally be 0001.
-    //
-    // We still calculate it from the school's existing users so
-    // the same approach can be reused when creating staff later.
-    // =========================================================
-
-    const staffCount = await User.count({
-      where: {
-        schoolId: newSchool.id,
-      },
+    // Generate the ID inside the same transaction that creates the user.
+    const loginId = await generateStaffLoginId({
+      schoolId: newSchool.id,
       transaction,
     });
-
-    const serialNumber = String(staffCount + 1).padStart(
-      4,
-      "0"
-    );
-
-    const loginId =
-      `${normalizedSchoolCode.substring(0, 3)}/STF/${serialNumber}`;
 
     // =========================================================
     // 14. HASH PASSWORD
@@ -843,13 +714,6 @@ export const getSchoolByCode = async (req, res) => {
   try {
     const { code } = req.params;
 
-    if (!code?.trim()) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'School code is required.',
-      });
-    }
-
     const school = await School.findOne({
       where: {
         schoolCode: code.trim().toUpperCase(),
@@ -958,15 +822,6 @@ export const updateSchoolSetup = async (req, res, next) => {
       }
     });
 
-    if (Object.keys(updates).length === 0) {
-      return next(
-        new AppError(
-          "No school setup fields provided for update.",
-          400
-        )
-      );
-    }
-
     const school = await School.findByPk(schoolId);
 
     if (!school) {
@@ -1022,56 +877,8 @@ export const createAcademicSetup = async (req, res, next) => {
       return next(new AppError("School not found.", 404));
     }
 
-    // 2. Validate session data
-    if (!session?.sessionName || !session?.startDate || !session?.endDate) {
-      await transaction.rollback();
-      return next(
-        new AppError(
-          "Session name, start date and end date are required.",
-          400
-        )
-      );
-    }
-
-    // 3. Validate session dates
-    if (new Date(session.endDate) <= new Date(session.startDate)) {
-      await transaction.rollback();
-      return next(
-        new AppError("Session end date must be after the start date.", 400)
-      );
-    }
-
-    // 4. Validate terms
-    if (!Array.isArray(terms) || terms.length === 0) {
-      await transaction.rollback();
-      return next(
-        new AppError("At least one term is required.", 400)
-      );
-    }
-
-    // 5. Check that every term has the required information
+    // 2. Check that every term falls inside the session range
     for (const term of terms) {
-      if (!term.termName || !term.startDate || !term.endDate) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            "Every term must have a name, start date and end date.",
-            400
-          )
-        );
-      }
-
-      if (new Date(term.endDate) <= new Date(term.startDate)) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `${term.termName} end date must be after its start date.`,
-            400
-          )
-        );
-      }
-
-      // Term must fall inside the session
       if (
         new Date(term.startDate) < new Date(session.startDate) ||
         new Date(term.endDate) > new Date(session.endDate)
@@ -1195,44 +1002,6 @@ export const createClassSetup = async (req, res, next) => {
       return next(new AppError("School not found.", 404));
     }
 
-    if (!Array.isArray(classes) || classes.length === 0) {
-      await transaction.rollback();
-      return next(
-        new AppError("At least one class is required.", 400)
-      );
-    }
-
-    const validCategories = [
-      "PRIMARY",
-      "JUNIOR_SECONDARY",
-      "SENIOR_SECONDARY",
-    ];
-
-    // Validate all classes before creating anything
-    for (const classItem of classes) {
-      const { classCategory, classLevel, arm } = classItem;
-
-      if (!classCategory || !classLevel || !arm) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            "Each class must have a category, level, and arm.",
-            400
-          )
-        );
-      }
-
-      if (!validCategories.includes(classCategory)) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `Invalid class category: ${classCategory}.`,
-            400
-          )
-        );
-      }
-    }
-
     // Prevent duplicates inside the same request
     const classKeys = classes.map(
       ({ classLevel, arm }) =>
@@ -1338,25 +1107,6 @@ export const createSubjectSetup = async (req, res, next) => {
     if (!school) {
       await transaction.rollback();
       return next(new AppError("School not found.", 404));
-    }
-
-    if (!Array.isArray(subjects) || subjects.length === 0) {
-      await transaction.rollback();
-      return next(
-        new AppError("At least one subject is required.", 400)
-      );
-    }
-
-    // Validate all subjects before creating anything
-    for (const subject of subjects) {
-      const { subjectName } = subject;
-
-      if (!subjectName || !subjectName.trim()) {
-        await transaction.rollback();
-        return next(
-          new AppError("Each subject must have a subject name.", 400)
-        );
-      }
     }
 
     // Prevent duplicate subjects inside the same request

@@ -3,7 +3,12 @@ import Session from "../models/Session.js";
 import  Term  from "../models/Term.js";
 import Class from "../models/Class.js";
 import Subject from "../models/Subject.js";
+import School from "../models/School.js";
 import AppError from "../utils/AppError.js";
+import { Op } from "sequelize";
+
+
+
 
 export const createSessionWithTerms = async (req, res, next) => {
   const transaction = await dbConnection.transaction();
@@ -22,143 +27,14 @@ export const createSessionWithTerms = async (req, res, next) => {
     // 2. Get request data
     const { session, terms } = req.body;
 
-    // 3. Validate session
-    if (!session?.sessionName?.trim()) {
-      await transaction.rollback();
-      return next(
-        new AppError("Session name is required.", 400)
-      );
-    }
-
-    if (!session?.startDate) {
-      await transaction.rollback();
-      return next(
-        new AppError("Session start date is required.", 400)
-      );
-    }
-
-    if (!session?.endDate) {
-      await transaction.rollback();
-      return next(
-        new AppError("Session end date is required.", 400)
-      );
-    }
-
-    // 4. Validate session dates
     const sessionStartDate = new Date(session.startDate);
     const sessionEndDate = new Date(session.endDate);
 
-    if (
-      Number.isNaN(sessionStartDate.getTime()) ||
-      Number.isNaN(sessionEndDate.getTime())
-    ) {
-      await transaction.rollback();
-      return next(
-        new AppError("Invalid session date provided.", 400)
-      );
-    }
-
-    if (sessionStartDate >= sessionEndDate) {
-      await transaction.rollback();
-      return next(
-        new AppError(
-          "Session end date must be after the start date.",
-          400
-        )
-      );
-    }
-
-    // 5. Validate terms
-    if (!Array.isArray(terms) || terms.length !== 3) {
-      await transaction.rollback();
-      return next(
-        new AppError(
-          "Exactly three terms are required: first, second and third term.",
-          400
-        )
-      );
-    }
-
-    const requiredTerms = [
-      "FIRST_TERM",
-      "SECOND_TERM",
-      "THIRD_TERM",
-    ];
-
-    const providedTermNames = terms.map(
-      (term) => term?.termName
-    );
-
-    const hasAllTerms = requiredTerms.every((termName) =>
-      providedTermNames.includes(termName)
-    );
-
-    if (!hasAllTerms) {
-      await transaction.rollback();
-      return next(
-        new AppError(
-          "Terms must include FIRST_TERM, SECOND_TERM and THIRD_TERM.",
-          400
-        )
-      );
-    }
-
-    // 6. Validate each term
+    // Validate that each term date range falls within the session dates
     for (const term of terms) {
-      if (!term?.termName) {
-        await transaction.rollback();
-        return next(
-          new AppError("Each term must have a term name.", 400)
-        );
-      }
-
-      if (!term?.startDate) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `${term.termName} start date is required.`,
-            400
-          )
-        );
-      }
-
-      if (!term?.endDate) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `${term.termName} end date is required.`,
-            400
-          )
-        );
-      }
-
       const termStartDate = new Date(term.startDate);
       const termEndDate = new Date(term.endDate);
 
-      if (
-        Number.isNaN(termStartDate.getTime()) ||
-        Number.isNaN(termEndDate.getTime())
-      ) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `Invalid date provided for ${term.termName}.`,
-            400
-          )
-        );
-      }
-
-      if (termStartDate >= termEndDate) {
-        await transaction.rollback();
-        return next(
-          new AppError(
-            `${term.termName} end date must be after its start date.`,
-            400
-          )
-        );
-      }
-
-      // Term must fall within the session
       if (
         termStartDate < sessionStartDate ||
         termEndDate > sessionEndDate
@@ -250,7 +126,8 @@ export const createSessionWithTerms = async (req, res, next) => {
   }
 };
 
-// Create a class and arm
+
+// Create a class and arm 
 export const createClass = async (req, res, next) => {
   try {
     // 1. Get authenticated school
@@ -262,62 +139,161 @@ export const createClass = async (req, res, next) => {
       );
     }
 
-    // 2. Get request data
-    const { classLevel, arm } = req.body;
+    // 2. Support a single class object or an array
+    const isSingleClass = !Array.isArray(req.body);
+    const submittedClasses = isSingleClass
+      ? [req.body]
+      : req.body;
 
-    // 3. Validate class level
-    if (!classLevel?.trim()) {
-      return next(
-        new AppError("Class level is required.", 400)
-      );
-    }
-
-    // 4. Validate arm
-    if (!arm?.trim()) {
-      return next(
-        new AppError("Class arm is required.", 400)
-      );
-    }
-
-    // 5. Check for duplicate class and arm
-    const existingClass = await Class.findOne({
-      where: {
+    // 3. Normalize class levels and arms
+    const classesToCreate = submittedClasses.map(
+      ({ classLevel, arm }) => ({
         schoolId,
-        classLevel: classLevel.trim(),
-        arm: arm.trim(),
-      },
-    });
+        classLevel: classLevel.trim().toUpperCase(),
+        arm: arm?.trim().toUpperCase() || null,
+      })
+    );
 
-    if (existingClass) {
-      return next(
-        new AppError(
-          "This class and arm already exists for this school.",
-          409
-        )
-      );
+    // Case-insensitive comparison helpers
+    const getLevelKey = (value) =>
+      value.trim().toLowerCase();
+
+    const getArmKey = (value) =>
+      value?.trim().toLowerCase() || null;
+
+    // 4. Reject duplicates and conflicting structures in the request
+    const submittedByLevel = new Map();
+
+    for (const item of classesToCreate) {
+      const levelKey = getLevelKey(item.classLevel);
+      const armKey = getArmKey(item.arm);
+
+      if (!submittedByLevel.has(levelKey)) {
+        submittedByLevel.set(levelKey, new Set());
+      }
+
+      const submittedArms = submittedByLevel.get(levelKey);
+
+      // Reject duplicate level + arm combinations
+      if (submittedArms.has(armKey)) {
+        return next(
+          new AppError(
+            `Class "${item.classLevel}" with this arm already appears in the request.`,
+            409
+          )
+        );
+      }
+
+      // An ungrouped class cannot coexist with named arms
+      if (
+        (armKey === null && submittedArms.size > 0) ||
+        submittedArms.has(null)
+      ) {
+        return next(
+          new AppError(
+            `Class "${item.classLevel}" cannot have both an ungrouped class and arm-based classes.`,
+            409
+          )
+        );
+      }
+
+      submittedArms.add(armKey);
     }
 
-    // 6. Create class without a form master
-    const newClass = await Class.create({
-      schoolId,
-      classLevel: classLevel.trim(),
-      arm: arm.trim(),
-    });
+    // 5. Check existing records and create atomically
+    const createdClasses = await dbConnection.transaction(
+      async (transaction) => {
+        // Lock the parent school row.
+        // Concurrent class-creation requests for this school must wait
+        // until the current transaction finishes.
+        const school = await School.findByPk(schoolId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
 
-    // 7. Success response
+        if (!school) {
+          throw new AppError(
+            "Authenticated school not found.",
+            404
+          );
+        }
+
+        // Fetch existing classes for this school.
+        // Compare in JavaScript to handle different capitalization
+        // in records created before this normalization.
+        const existingClasses = await Class.findAll({
+          where: { schoolId },
+          transaction,
+        });
+
+        const existingByLevel = new Map();
+
+        for (const existing of existingClasses) {
+          const levelKey = getLevelKey(existing.classLevel);
+
+          if (!existingByLevel.has(levelKey)) {
+            existingByLevel.set(levelKey, []);
+          }
+
+          existingByLevel.get(levelKey).push(existing);
+        }
+
+        // Check every incoming class against existing records
+        for (const item of classesToCreate) {
+          const levelKey = getLevelKey(item.classLevel);
+          const armKey = getArmKey(item.arm);
+
+          const existingAtLevel =
+            existingByLevel.get(levelKey) || [];
+
+          for (const existing of existingAtLevel) {
+            const existingArmKey = getArmKey(existing.arm);
+
+            // Reject duplicate class + arm
+            if (existingArmKey === armKey) {
+              throw new AppError(
+                `Class "${item.classLevel}" with this arm already exists for this school.`,
+                409
+              );
+            }
+
+            // Reject mixing ungrouped and arm-based classes
+            if (
+              existingArmKey === null ||
+              armKey === null
+            ) {
+              throw new AppError(
+                `Class "${item.classLevel}" cannot have both an ungrouped class and arm-based classes.`,
+                409
+              );
+            }
+          }
+        }
+
+        // Create the entire batch in the same transaction
+        return Class.bulkCreate(classesToCreate, {
+          transaction,
+          validate: true,
+        });
+      }
+    );
+
+    // 6. Return a response matching the request format
     return res.status(201).json({
       success: true,
-      message: "Class created successfully.",
-      data: {
-        class: newClass,
-      },
+      message: isSingleClass
+        ? "Class created successfully."
+        : `${createdClasses.length} classes created successfully.`,
+      data: isSingleClass
+        ? { class: createdClasses[0] }
+        : { classes: createdClasses },
     });
   } catch (error) {
-    // Handle Sequelize unique constraint
+    // Handle database uniqueness violations
     if (error.name === "SequelizeUniqueConstraintError") {
       return next(
         new AppError(
-          "This class and arm already exists for this school.",
+          "A class with the same level and arm already exists for this school.",
           409
         )
       );
@@ -330,63 +306,103 @@ export const createClass = async (req, res, next) => {
 
 // Create a subject
 export const createSubject = async (req, res, next) => {
+  let transaction;
+
   try {
     // 1. Get authenticated school
     const schoolId = req.user?.schoolId;
 
     if (!schoolId) {
-      return next(
-        new AppError("Authenticated school not found.", 401)
-      );
+      return next(new AppError("Authenticated school not found.", 401));
     }
 
-    // 2. Get request data
-    const { subjectName } = req.body;
+    // 2. Support both single-subject and multiple-subject payloads
+    const subjects = Array.isArray(req.body.subjects)
+      ? req.body.subjects
+      : [{ subjectName: req.body.subjectName }];
 
-    // 3. Validate subject name
-    if (!subjectName?.trim()) {
-      return next(
-        new AppError("Subject name is required.", 400)
-      );
-    }
+    // 3. Normalize subject names
+    const normalizedSubjects = subjects.map((subject) => ({
+      subjectName: subject.subjectName.trim(),
+    }));
 
-    // 4. Check for duplicate subject
-    const existingSubject = await Subject.findOne({
-      where: {
-        schoolId,
-        subjectName: subjectName.trim(),
-      },
-    });
+    // 4. Reject duplicate names within the submitted batch
+    const submittedNames = normalizedSubjects.map(({ subjectName }) =>
+      subjectName.toLocaleLowerCase()
+    );
 
-    if (existingSubject) {
+    if (new Set(submittedNames).size !== submittedNames.length) {
       return next(
         new AppError(
-          "This subject already exists for this school.",
+          "The submitted subjects contain duplicate names.",
           409
         )
       );
     }
 
-    // 5. Create subject
-    const newSubject = await Subject.create({
-      schoolId,
-      subjectName: subjectName.trim(),
+    // 5. Start transaction
+    transaction = await dbConnection.transaction();
+
+    // 6. Check existing subjects belonging to this school
+    const existingSubjects = await Subject.findAll({
+      where: { schoolId },
+      attributes: ["subjectName"],
+      transaction,
     });
 
-    // 6. Success response
+    const existingNames = new Set(
+      existingSubjects.map((subject) =>
+        subject.subjectName.trim().toLocaleLowerCase()
+      )
+    );
+
+    const duplicateSubject = normalizedSubjects.find(({ subjectName }) =>
+      existingNames.has(subjectName.toLocaleLowerCase())
+    );
+
+    if (duplicateSubject) {
+      throw new AppError(
+        `"${duplicateSubject.subjectName}" already exists for this school.`,
+        409
+      );
+    }
+
+    // 7. Create all submitted subjects in the same transaction
+    const createdSubjects = await Subject.bulkCreate(
+      normalizedSubjects.map(({ subjectName }) => ({
+        schoolId,
+        subjectName,
+      })),
+      {
+        transaction,
+        validate: true,
+      }
+    );
+
+    await transaction.commit();
+
+    // 8. Return the created subjects
     return res.status(201).json({
       success: true,
-      message: "Subject created successfully.",
+      message:
+        createdSubjects.length === 1
+          ? "Subject created successfully."
+          : "Subjects created successfully.",
       data: {
-        subject: newSubject,
+        subjects: createdSubjects,
+        // Retain compatibility with callers expecting data.subject
+        subject: createdSubjects[0],
       },
     });
   } catch (error) {
-    // Handle Sequelize unique constraint
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     if (error.name === "SequelizeUniqueConstraintError") {
       return next(
         new AppError(
-          "This subject already exists for this school.",
+          "One or more subjects already exist for this school.",
           409
         )
       );

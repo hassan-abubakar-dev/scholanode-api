@@ -1,8 +1,5 @@
 import { DataTypes } from "sequelize";
-import dotenv from "dotenv";
 import { dbConnection } from "../config/db.js";
-
-dotenv.config();
 
 const Subject = dbConnection.define(
   "Subject",
@@ -23,7 +20,7 @@ const Subject = dbConnection.define(
     // Examples:
     // Mathematics
     // English Language
-    // Biology  
+    // Biology
     // Basic Science
     subjectName: {
       type: DataTypes.STRING(100),

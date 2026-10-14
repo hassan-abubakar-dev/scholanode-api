@@ -16,7 +16,7 @@ import generateToken from '../utils/token.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 import generateExpiryTime from '../utils/experyTime.js';
 
-import { User, School, Owner } from "../relationships/associations.js";
+import { User, School, Owner, Student } from "../relationships/associations.js";
 import VerificationCode from '../models/VerificationCode.js';
 
 
@@ -27,17 +27,6 @@ const isDev = process.env.NODE_ENV === 'development';
 export const loginUser = async (req, res, next) => {
   try {
     const { schoolCode, loginId, password } = req.body;
-
-    // 1. Validate required fields
-    if (!schoolCode?.trim() || !loginId?.trim() || !password) {
-      return next(
-        new AppError(
-          "School code, login ID, and password are required.",
-          400
-        )
-      );
-    }
-
     const normalizedSchoolCode = schoolCode.trim().toUpperCase();
     const normalizedLoginId = loginId.trim().toUpperCase();
 
@@ -267,27 +256,116 @@ export const requestNewAccessToken = async (req, res, next) => {
 };
 
 
-export const forgotLoginId = async (req, res, next) => {
+export const getLoggedInUser = async (req, res, next) => {
   try {
-    const { email } = req.body;
+    const userId = req.user?.id;
 
-    // =========================================================
-    // 1. VALIDATE REQUIRED FIELD
-    // =========================================================
+    if (!userId) {
+      return next(
+        new AppError("User not authenticated or session is invalid.", 401)
+      );
+    }
 
-    if (!email?.trim()) {
+    const user = await User.findByPk(userId, {
+      attributes: { exclude: ["passwordHash"] },
+    });
+
+    if (!user) {
+      return next(
+        new AppError("The user belonging to this account no longer exists.", 404)
+      );
+    }
+
+    if (user.status !== "ACTIVE") {
       return next(
         new AppError(
-          "Email address is required.",
-          400
+          "Your account is not active. Please contact your school administrator.",
+          403
         )
       );
     }
 
-    // =========================================================
-    // 2. NORMALIZE EMAIL
-    // =========================================================
+    let isOwner = false;
+    let studentProfile = null;
 
+    if (user.role !== "STUDENT") {
+      const owner = await Owner.findOne({
+        where: {
+          schoolId: user.schoolId,
+          userId: user.id,
+        },
+      });
+      isOwner = Boolean(owner);
+    } else {
+      studentProfile = await Student.findOne({
+        where: {
+          userId: user.id,
+        },
+      });
+    }
+
+    const school = await School.findByPk(user.schoolId);
+
+    const userData = {
+      id: user.id,
+      loginId: user.loginId,
+      firstName: user.firstName,
+      surName: user.surName,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      profileImageUrl: user.profileImageUrl,
+      role: user.role,
+      status: user.status,
+      isOwner,
+      createdAt: user.createdAt,
+    };
+
+  const schoolData = school
+  ? {
+      id: school.id,
+      schoolCode: school.schoolCode,
+      schoolName: school.schoolName,
+      schoolLevel: school.schoolLevel,
+      ownershipType: school.ownershipType,
+      status: school.status,
+      logoUrl: school.logoUrl,
+    }
+  : null;
+
+  console.log('schoolData, from getLoggedInUser:', schoolData);
+
+    return res.status(200).json({
+      status: "success",
+      user: userData,
+      school: schoolData,
+      student: studentProfile,
+      data: {
+        user: userData,
+        school: schoolData,
+        student: studentProfile,
+      },
+    });
+  } catch (error) {
+    console.error("GET_LOGGED_IN_USER_ERROR:", {
+      url: req.originalUrl,
+      method: req.method,
+      ip: req.ip,
+      error,
+    });
+
+    return next(
+      new AppError(
+        isDev ? error.message : "Failed to retrieve logged-in user profile.",
+        500
+      )
+    );
+  }
+};
+
+
+export const forgotLoginId = async (req, res, next) => {
+  try {
+    const { email } = req.body;
     const normalizedEmail = email.trim().toLowerCase();
 
     // =========================================================
@@ -535,27 +613,6 @@ export const forgotPassword = async (req, res, next) => {
 
   try {
     const { email } = req.body;
-    console.log("email", email);
-
-    // =========================================================
-    // 1. VALIDATE REQUIRED FIELD
-    // =========================================================
-
-    if (!email?.trim()) {
-      await transaction.rollback();
-
-      return next(
-        new AppError(
-          "Email address is required.",
-          400
-        )
-      );
-    }
-
-    // =========================================================
-    // 2. NORMALIZE EMAIL
-    // =========================================================
-
     const normalizedEmail = email.trim().toLowerCase();
 
     // =========================================================
@@ -814,21 +871,6 @@ export const resetPassword = async (req, res, next) => {
     const { password, token } = req.body;
 
     // =========================================================
-    // 1. VALIDATE REQUIRED FIELDS
-    // =========================================================
-
-    if (!password || !token) {
-      await transaction.rollback();
-
-      return next(
-        new AppError(
-          "Password and reset token are required.",
-          400
-        )
-      );
-    }
-
-    // =========================================================
     // 2. VERIFY PASSWORD RESET TOKEN
     // =========================================================
 
@@ -910,7 +952,7 @@ export const resetPassword = async (req, res, next) => {
     // 7. UPDATE PASSWORD
     // =========================================================
 
-    user.password = hashedPassword;
+    user.passwordHash = hashedPassword;
 
     await user.save({
       transaction,

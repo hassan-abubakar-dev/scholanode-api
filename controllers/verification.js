@@ -15,17 +15,8 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
 
   try {
     const { email, code } = req.body;
-    console.log("Received verification request:", { email, code });
-
-    if (!email || !code) {
-      await transaction.rollback();
-
-      return next(
-        new AppError("Email and verification code are required.", 400)
-      );
-    }
-
     const normalizedEmail = email.trim().toLowerCase();
+    const normalizedCode = code.trim();
 
     // 1. Find and lock the verification code
     const existingCode = await VerificationCode.findOne({
@@ -165,27 +156,6 @@ export const verifyRecoveryCode = async (req, res, next) => {
 
   try {
     const { verificationCode, email } = req.body;
-    console.log("Received recovery code verification request:", { email, verificationCode });
-
-    // =========================================================
-    // 1. VALIDATE REQUIRED FIELDS
-    // =========================================================
-
-    if (!email?.trim() || !verificationCode?.trim()) {
-      await transaction.rollback();
-
-      return next(
-        new AppError(
-          "Email address and verification code are required.",
-          400
-        )
-      );
-    }
-
-    // =========================================================
-    // 2. NORMALIZE INPUT
-    // =========================================================
-
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedCode = verificationCode.trim();
 

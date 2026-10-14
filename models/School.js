@@ -62,7 +62,7 @@ ownershipType: {
     // COMPLETED DURING SCHOOL SETUP
     // ===============================
 
-      supportEmail: {
+    supportEmail: {
       type: DataTypes.STRING(100),
       allowNull: true,
       validate: {
@@ -74,7 +74,6 @@ ownershipType: {
       type: DataTypes.STRING(20),
       allowNull: true,
     },
-
 
     logoUrl: {
       type: DataTypes.STRING,
@@ -94,27 +93,23 @@ ownershipType: {
       allowNull: true,
     },
 
-    supportEmail: {
-      type: DataTypes.STRING(100),
+    loginInstructions: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    registrationGuidelines: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    website: {
+      type: DataTypes.STRING(255),
       allowNull: true,
       validate: {
-        isEmail: true,
+        isUrl: true,
       },
     },
-
-    supportPhone: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-    },
-
-    
-website: {
-  type: DataTypes.STRING(255),
-  allowNull: true,
-  validate: {
-    isUrl: true,
-  },
-},
 
     // ===============================
     // SYSTEM FIELDS

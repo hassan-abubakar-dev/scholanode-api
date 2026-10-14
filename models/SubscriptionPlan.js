@@ -24,11 +24,13 @@ const SubscriptionPlan = dbConnection.define(
     // STANDARD
     plan: {
       type: DataTypes.ENUM(
+        "FREE",
         "STARTER",
-        "STANDARD"
+        "STANDARD",
+        "PROFESSIONAL"
       ),
       allowNull: false,
-      defaultValue: "STARTER",
+      defaultValue: "FREE",
     },
 
     // Billing cycle

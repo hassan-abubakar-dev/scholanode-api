@@ -18,9 +18,12 @@
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
+    "csv-parse": "^7.0.3",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.4.0",
     "mysql2": "^3.22.6",
     "sequelize": "^6.37.8"
   },

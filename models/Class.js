@@ -40,14 +40,13 @@ const Class = dbConnection.define(
     // Blue
     // Science
     // Commercial
-    arm: {
+   arm: {
       type: DataTypes.STRING(50),
-      allowNull: false,
-      validate: {
-        notEmpty: true,
-        len: [1, 50],
-      },
-    },
+      allowNull: true,
+        validate: {
+          len: [1, 50],
+        },
+},
 
     // Assigned class teacher
     formMasterId: {

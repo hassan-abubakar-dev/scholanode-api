@@ -21,17 +21,7 @@ export const initializePayment = async (req, res) => {
     } = req.body;
     const { schoolId } = req.params;
 
-    // ========================================
-    // VALIDATE REQUIRED FIELDS
-    // ========================================
 
-    if (!schoolId || !email || !plan || !tierId || !billingCycle) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "School ID in the URL, email, plan, tierId, and billingCycle are required.",
-      });
-    }
 
     if (req.user?.schoolId && req.user.schoolId !== schoolId) {
       return res.status(403).json({
@@ -370,12 +360,7 @@ export const getPaymentStatus = async (req, res) => {
   try {
     const { reference } = req.params;
 
-    if (!reference) {
-      return res.status(400).json({
-        success: false,
-        message: "Payment reference is required.",
-      });
-    }
+
 
     const payment = await Payment.findOne({
       where: { reference },

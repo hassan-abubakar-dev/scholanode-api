@@ -52,15 +52,28 @@ const User = dbConnection.define(
       allowNull: false,
     },
 
+    mustChangePassword: {
+  type: DataTypes.BOOLEAN,
+  allowNull: false,
+  defaultValue: false,
+},
+
+profileCompleted: {
+  type: DataTypes.BOOLEAN,
+  allowNull: false,
+  defaultValue: true,
+},
+
 role: {
     type: DataTypes.ENUM(
         "LEADER",
-        "VICE",
+        "VICE_LEADER",
         "ADMINISTRATOR",
         "EXAM_OFFICER",
-        "BURSAR",
+        "STAFF",
         "PARENT",
-        "STUDENT"
+        "STUDENT",
+        "SECURITY",
     ),
     allowNull: false,
 },
