@@ -3,6 +3,7 @@ import {
   createSessionWithTerms,
   createClass,
   createSubject,
+  saveWorkingDays,
   getAcademicSetupProgress,
 } from "../controllers/academicSetup.js";
 import { protectRoutes } from "../middleware/auth.js";
@@ -38,6 +39,13 @@ router.post(
   validate(createSubjectSchema, "body"),
   createSubject
 );
+
+// Save working days
+router.post(
+  "/working-days",
+  protectRoutes,
+  saveWorkingDays
+);  
 
 router.get(
   "/progress",

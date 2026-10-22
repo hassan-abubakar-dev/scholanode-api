@@ -21,6 +21,9 @@ import classRouter from './routes/class.js';
 import subjectRouter from './routes/subject.js';
 import staffRouter from './routes/staff.js';
 import studentRouter from './routes/student.js';
+import parentRouter from './routes/parent.js';
+import attendanceRouter from './routes/attendance.js';
+import gateSecurityRouter from './routes/gateSecurity.js'
 
 
 
@@ -78,6 +81,9 @@ app.use('/api/classes', classRouter);
 app.use('/api/subjects', subjectRouter);
 app.use('/api/staffs', staffRouter);
 app.use('/api/students', studentRouter);
+app.use('/api/parents', parentRouter);
+app.use('/api/attendances', attendanceRouter);
+app.use('/api/gate-securities', gateSecurityRouter); 
 // error handle
 app.use(errorHandler);
 

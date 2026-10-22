@@ -2,6 +2,7 @@
 import { Class, User, Student } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
+import { Op } from "sequelize";
 
 // Get all classes belonging to the authenticated school
 export const getSchoolClasses = async (req, res, next) => {
@@ -145,9 +146,11 @@ export const assignFormMaster = async (req, res, next) => {
 
         // 5. If an ID was provided, verify eligible staff
         if (formMasterId !== null) {
+          const normalizedFormMasterId = formMasterId.trim();
+
           const formMaster = await User.findOne({
             where: {
-              id: formMasterId.trim(),
+              id: normalizedFormMasterId,
               schoolId,
               role: "STAFF",
               status: "ACTIVE",
@@ -167,9 +170,30 @@ export const assignFormMaster = async (req, res, next) => {
               400
             );
           }
+
+          // 6. Ensure this staff member is not assigned
+          // as form master to another class.
+          const existingAssignment = await Class.findOne({
+            where: {
+              schoolId,
+              formMasterId: normalizedFormMasterId,
+              id: {
+                [Op.ne]: classRecord.id,
+              },
+            },
+            attributes: ["id", "classLevel", "arm"],
+            transaction,
+          });
+
+          if (existingAssignment) {
+            throw new AppError(
+              "This staff member is already assigned as a form master to another class.",
+              409
+            );
+          }
         }
 
-        // 6. Assign, change, or remove the form master
+        // 7. Assign, change, or remove the form master
         await classRecord.update(
           {
             formMasterId:
@@ -180,7 +204,7 @@ export const assignFormMaster = async (req, res, next) => {
           { transaction }
         );
 
-        // 7. Return the updated class with its form master
+        // 8. Return the updated class with its form master
         return Class.findByPk(classRecord.id, {
           attributes: [
             "id",

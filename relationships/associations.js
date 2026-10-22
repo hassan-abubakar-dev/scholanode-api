@@ -11,6 +11,15 @@ import SubjectAssignment from "../models/SubjectAssignment.js";
 import Parent from "../models/Parent.js";
 import ParentStudent from "../models/ParentStudent.js";
 
+// attendance models
+import AttendanceRegister from "../models/AttendanceRegister.js";
+import AttendanceRecord from "../models/AttendanceRecord.js";
+import GateScanRecord from "../models/GateScanRecord.js";
+// working day model
+import WorkingDay from "../models/WorkingDay.js";
+// get scanner model
+import GateScanner from "../models/GateScanner.js";
+
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -237,6 +246,214 @@ ParentStudent.belongsTo(School, {
   as: "school",
 });
 
+// Parent ↔ User
+Parent.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+});
+
+User.hasOne(Parent, {
+  foreignKey: "userId",
+  as: "parent",
+});
+
+// Parent ↔ ParentStudent
+Parent.hasMany(ParentStudent, {
+  foreignKey: "parentId",
+  as: "studentRelationships",
+});
+
+ParentStudent.belongsTo(Parent, {
+  foreignKey: "parentId",
+  as: "parent",
+});
+
+// Student ↔ ParentStudent
+Student.hasMany(ParentStudent, {
+  foreignKey: "studentId",
+  as: "parentRelationships",
+});
+
+ParentStudent.belongsTo(Student, {
+  foreignKey: "studentId",
+  as: "student",
+});
+
+
+/*
+|--------------------------------------------------------------------------
+| Attendance Register Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ AttendanceRegister
+School.hasMany(AttendanceRegister, {
+  foreignKey: "schoolId",
+  as: "attendanceRegisters",
+});
+
+AttendanceRegister.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// Class ↔ AttendanceRegister
+Class.hasMany(AttendanceRegister, {
+  foreignKey: "classId",
+  as: "attendanceRegisters",
+});
+
+AttendanceRegister.belongsTo(Class, {
+  foreignKey: "classId",
+  as: "class",
+});
+
+// Session ↔ AttendanceRegister
+Session.hasMany(AttendanceRegister, {
+  foreignKey: "sessionId",
+  as: "attendanceRegisters",
+});
+
+AttendanceRegister.belongsTo(Session, {
+  foreignKey: "sessionId",
+  as: "session",
+});
+
+// Term ↔ AttendanceRegister
+Term.hasMany(AttendanceRegister, {
+  foreignKey: "termId",
+  as: "attendanceRegisters",
+});
+
+AttendanceRegister.belongsTo(Term, {
+  foreignKey: "termId",
+  as: "term",
+});
+
+// User ↔ AttendanceRegister (creator)
+User.hasMany(AttendanceRegister, {
+  foreignKey: "createdByUserId",
+  as: "createdAttendanceRegisters",
+});
+
+AttendanceRegister.belongsTo(User, {
+  foreignKey: "createdByUserId",
+  as: "createdBy",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Attendance Record Relationships
+|--------------------------------------------------------------------------
+*/
+
+// AttendanceRegister ↔ AttendanceRecord
+AttendanceRegister.hasMany(AttendanceRecord, {
+  foreignKey: "attendanceRegisterId",
+  as: "attendanceRecords",
+});
+
+AttendanceRecord.belongsTo(AttendanceRegister, {
+  foreignKey: "attendanceRegisterId",
+  as: "attendanceRegister",
+});
+
+// Student ↔ AttendanceRecord
+Student.hasMany(AttendanceRecord, {
+  foreignKey: "studentId",
+  as: "attendanceRecords",
+});
+
+AttendanceRecord.belongsTo(Student, {
+  foreignKey: "studentId",
+  as: "student",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Gate Scan Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ GateScanRecord
+School.hasMany(GateScanRecord, {
+  foreignKey: "schoolId",
+  as: "gateScanRecords",
+});
+
+GateScanRecord.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// Student ↔ GateScanRecord
+Student.hasMany(GateScanRecord, {
+  foreignKey: "studentId",
+  as: "gateScanRecords",
+});
+
+GateScanRecord.belongsTo(Student, {
+  foreignKey: "studentId",
+  as: "student",
+});
+
+// User ↔ GateScanRecord (scanner)
+User.hasMany(GateScanRecord, {
+  foreignKey: "scannedByUserId",
+  as: "scannedGateRecords",
+});
+
+GateScanRecord.belongsTo(User, {
+  foreignKey: "scannedByUserId",
+  as: "scannedBy",
+});
+
+
+/*
+|--------------------------------------------------------------------------
+| Gate Scanner Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ GateScanner
+School.hasMany(GateScanner, {
+  foreignKey: "schoolId",
+  as: "gateScanners",
+});
+
+GateScanner.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// User ↔ GateScanner (authorized existing staff)
+User.hasMany(GateScanner, {
+  foreignKey: "userId",
+  as: "gateScannerPermissions",
+});
+
+GateScanner.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Working Day Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ WorkingDay
+School.hasOne(WorkingDay, {
+  foreignKey: "schoolId",
+  as: "workingDays",
+});
+
+WorkingDay.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -256,4 +473,9 @@ export {
   SubjectAssignment,
    Parent,
   ParentStudent,
+AttendanceRegister,
+AttendanceRecord,
+GateScanRecord,
+GateScanner,
+WorkingDay
 };

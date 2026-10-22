@@ -6,6 +6,7 @@ import {
   forgotPassword,
   resetPassword,
   requestNewAccessToken,
+  logOutUser
 } from "../controllers/auth.js";
 import { protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
@@ -42,5 +43,7 @@ router.post(
   validate(resetPasswordValidationSchema, "body"),
   resetPassword
 );
+
+router.post('/log-out', protectRoutes, logOutUser);
 
 export default router;

@@ -5,6 +5,7 @@ import Class from "../models/Class.js";
 import Subject from "../models/Subject.js";
 import School from "../models/School.js";
 import AppError from "../utils/AppError.js";
+import WorkingDay from "../models/WorkingDay.js";
 import { Op } from "sequelize";
 
 
@@ -412,6 +413,83 @@ export const createSubject = async (req, res, next) => {
   }
 };
 
+export const saveWorkingDays = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const { days } = req.body;
+
+    // 1. Verify authenticated school
+    if (!schoolId) {
+      throw new AppError(
+        "Authenticated school not found.",
+        401
+      );
+    }
+
+    // 2. Create or update the school's working days
+    const savedWorkingDays = await dbConnection.transaction(
+      async (transaction) => {
+        // Lock the school row to serialize working-day saves
+        // for this school.
+        const school = await School.findByPk(schoolId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (!school) {
+          throw new AppError(
+            "Authenticated school not found.",
+            404
+          );
+        }
+
+        const existingWorkingDays = await WorkingDay.findOne({
+          where: { schoolId },
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (existingWorkingDays) {
+          await existingWorkingDays.update(
+            { days },
+            { transaction }
+          );
+
+          return existingWorkingDays;
+        }
+
+        return WorkingDay.create(
+          {
+            schoolId,
+            days,
+          },
+          { transaction }
+        );
+      }
+    );
+
+    // 3. Return success response
+    return res.status(200).json({
+      success: true,
+      message: "School working days saved successfully.",
+      data: {
+        workingDays: savedWorkingDays,
+      },
+    });
+  } catch (error) {
+    if (error.name === "SequelizeUniqueConstraintError") {
+      return next(
+        new AppError(
+          "Working days were saved by another request. Please try again.",
+          409
+        )
+      );
+    }
+
+    return next(error);
+  }
+};
+
 export const getAcademicSetupProgress = async (req, res, next) => {
   try {
     // 1. Get authenticated school
@@ -425,53 +503,55 @@ export const getAcademicSetupProgress = async (req, res, next) => {
 
     // 2. Check Sessions & Terms
     const sessionCount = await Session.count({
-      where: {
-        schoolId,
-      },
+      where: { schoolId },
     });
 
     const sessionsAndTermsCompleted = sessionCount > 0;
 
     // 3. Check Classes & Arms
     const classCount = await Class.count({
-      where: {
-        schoolId,
-      },
+      where: { schoolId },
     });
 
     const classesAndArmsCompleted = classCount > 0;
 
     // 4. Check Subjects
     const subjectCount = await Subject.count({
-      where: {
-        schoolId,
-      },
+      where: { schoolId },
     });
 
     const subjectsCompleted = subjectCount > 0;
 
-    // 5. Calculate progress
-    const completedSteps = [
-      sessionsAndTermsCompleted,
-      classesAndArmsCompleted,
-      subjectsCompleted,
-    ].filter(Boolean).length;
+    // 5. Check Working Days
+    const workingDaysCount = await WorkingDay.count({
+      where: { schoolId },
+    });
+
+    const workingDaysCompleted = workingDaysCount > 0;
+
+    // 6. Calculate progress across four setup steps
+    const steps = {
+      sessionsAndTerms: sessionsAndTermsCompleted,
+      classesAndArms: classesAndArmsCompleted,
+      subjects: subjectsCompleted,
+      workingDays: workingDaysCompleted,
+    };
+
+    const completedSteps = Object.values(steps).filter(
+      Boolean
+    ).length;
 
     const progress = Math.round(
-      (completedSteps / 3) * 100
+      (completedSteps / 4) * 100
     );
 
-    // 6. Success response
+    // 7. Success response
     return res.status(200).json({
       success: true,
       data: {
         progress,
         completed: progress === 100,
-        steps: {
-          sessionsAndTerms: sessionsAndTermsCompleted,
-          classesAndArms: classesAndArmsCompleted,
-          subjects: subjectsCompleted,
-        },
+        steps,
       },
     });
   } catch (error) {

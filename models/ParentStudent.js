@@ -42,12 +42,6 @@ const ParentStudent = dbConnection.define(
       allowNull: false,
     },
 
-    isPrimary: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-    },
-
     receivesNotifications: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

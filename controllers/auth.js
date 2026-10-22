@@ -16,7 +16,7 @@ import generateToken from '../utils/token.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 import generateExpiryTime from '../utils/experyTime.js';
 
-import { User, School, Owner, Student } from "../relationships/associations.js";
+import { User, School, Owner, Student, Class } from "../relationships/associations.js";
 import VerificationCode from '../models/VerificationCode.js';
 
 
@@ -92,7 +92,7 @@ export const loginUser = async (req, res, next) => {
     if (!isPasswordValid) {
       return next(
         new AppError(
-          "Invalid school code or login credentials.",
+          "Invalid school code or login credentials. INVALID PASSWORD",
           401
         )
       );
@@ -287,7 +287,10 @@ export const getLoggedInUser = async (req, res, next) => {
 
     let isOwner = false;
     let studentProfile = null;
+    let isFormMaster = false;
+    let formClass = null;
 
+    // Check whether the user is a school owner.
     if (user.role !== "STUDENT") {
       const owner = await Owner.findOne({
         where: {
@@ -295,8 +298,10 @@ export const getLoggedInUser = async (req, res, next) => {
           userId: user.id,
         },
       });
+
       isOwner = Boolean(owner);
     } else {
+      // Retrieve the student's profile.
       studentProfile = await Student.findOne({
         where: {
           userId: user.id,
@@ -304,6 +309,28 @@ export const getLoggedInUser = async (req, res, next) => {
       });
     }
 
+    // Only STAFF users can be form masters.
+    if (user.role === "STAFF") {
+      const assignedClass = await Class.findOne({
+        where: {
+          schoolId: user.schoolId,
+          formMasterId: user.id,
+        },
+        attributes: ["id", "classLevel", "arm"],
+      });
+
+      if (assignedClass) {
+        isFormMaster = true;
+
+        formClass = {
+          id: assignedClass.id,
+          classLevel: assignedClass.classLevel,
+          arm: assignedClass.arm,
+        };
+      }
+    }
+
+    // Retrieve school information.
     const school = await School.findByPk(user.schoolId);
 
     const userData = {
@@ -317,22 +344,22 @@ export const getLoggedInUser = async (req, res, next) => {
       role: user.role,
       status: user.status,
       isOwner,
+      isFormMaster,
+      formClass,
       createdAt: user.createdAt,
     };
 
-  const schoolData = school
-  ? {
-      id: school.id,
-      schoolCode: school.schoolCode,
-      schoolName: school.schoolName,
-      schoolLevel: school.schoolLevel,
-      ownershipType: school.ownershipType,
-      status: school.status,
-      logoUrl: school.logoUrl,
-    }
-  : null;
-
-  console.log('schoolData, from getLoggedInUser:', schoolData);
+    const schoolData = school
+      ? {
+          id: school.id,
+          schoolCode: school.schoolCode,
+          schoolName: school.schoolName,
+          schoolLevel: school.schoolLevel,
+          ownershipType: school.ownershipType,
+          status: school.status,
+          logoUrl: school.logoUrl,
+        }
+      : null;
 
     return res.status(200).json({
       status: "success",
@@ -361,7 +388,6 @@ export const getLoggedInUser = async (req, res, next) => {
     );
   }
 };
-
 
 export const forgotLoginId = async (req, res, next) => {
   try {
@@ -1005,3 +1031,33 @@ export const resetPassword = async (req, res, next) => {
 };
 
 
+export const logOutUser = async (req, res, next) => {
+  try {
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite:
+        process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Logged out successfully.",
+    });
+  } catch (err) {
+    console.error("LOGOUT_USER_ERROR:", {
+      url: req.originalUrl,
+      method: req.method,
+      ip: req.ip,
+      error: err,
+    });
+
+    return next(
+      new AppError(
+        isDev ? err.message : "Failed to log out.",
+        500
+      )
+    );
+  }
+};

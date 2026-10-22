@@ -5,7 +5,7 @@ import { dbConnection } from "../config/db.js";
 dotenv.config();
 
 const Parent = dbConnection.define(
-  "Parent",
+  "Parent", 
   {
     id: {
       type: DataTypes.UUID,
@@ -22,15 +22,6 @@ const Parent = dbConnection.define(
       type: DataTypes.UUID,
       allowNull: false,
       unique: true,
-    },
-
-    // ===============================
-    // PARENT IDENTIFICATION
-    // ===============================
-
-    parentId: {
-      type: DataTypes.STRING(30),
-      allowNull: false,
     },
 
     // ===============================

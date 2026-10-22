@@ -93,15 +93,6 @@ ownershipType: {
       allowNull: true,
     },
 
-    loginInstructions: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-
-    registrationGuidelines: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
 
     website: {
       type: DataTypes.STRING(255),
