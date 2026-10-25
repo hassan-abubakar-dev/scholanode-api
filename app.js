@@ -23,7 +23,10 @@ import staffRouter from './routes/staff.js';
 import studentRouter from './routes/student.js';
 import parentRouter from './routes/parent.js';
 import attendanceRouter from './routes/attendance.js';
-import gateSecurityRouter from './routes/gateSecurity.js'
+import gateSecurityRouter from './routes/gateSecurity.js';
+import gateScannerRoutes from "./routes/gateScanner.js";
+import compaintRouter from "./routes/complaint.js";
+
 
 
 
@@ -84,6 +87,8 @@ app.use('/api/students', studentRouter);
 app.use('/api/parents', parentRouter);
 app.use('/api/attendances', attendanceRouter);
 app.use('/api/gate-securities', gateSecurityRouter); 
+app.use("/api/gate-scanners", gateScannerRoutes);
+app.use("/api/complaints", compaintRouter);
 // error handle
 app.use(errorHandler);
 

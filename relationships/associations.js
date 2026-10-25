@@ -19,6 +19,11 @@ import GateScanRecord from "../models/GateScanRecord.js";
 import WorkingDay from "../models/WorkingDay.js";
 // get scanner model
 import GateScanner from "../models/GateScanner.js";
+import Complaint from "../models/Complaint.js";
+
+import PlatformUser from "../models/PlatformUser.js";
+import SupportConversation from "../models/SupportConversation.js";
+import ConversationMessage from "../models/ConversationMessage.js";
 
 /*
 |--------------------------------------------------------------------------
@@ -454,6 +459,115 @@ WorkingDay.belongsTo(School, {
   as: "school",
 });
 
+
+
+// ===============================
+// COMPLAINT RELATIONSHIPS
+// ===============================
+
+// A school has many complaints
+School.hasMany(Complaint, {
+  foreignKey: "schoolId",
+  as: "complaints",
+});
+
+// Each complaint belongs to a school
+Complaint.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// A user can submit many complaints
+User.hasMany(Complaint, {
+  foreignKey: "senderId",
+  as: "submittedComplaints",
+});
+
+// Each complaint belongs to its sender
+Complaint.belongsTo(User, {
+  foreignKey: "senderId",
+  as: "sender",
+});
+
+
+/*
+|--------------------------------------------------------------------------
+| Support Conversation Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ SupportConversation
+School.hasMany(SupportConversation, {
+  foreignKey: "schoolId",
+  as: "supportConversations",
+});
+
+SupportConversation.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// User ↔ SupportConversation (creator)
+User.hasMany(SupportConversation, {
+  foreignKey: "createdByUserId",
+  as: "createdSupportConversations",
+});
+
+SupportConversation.belongsTo(User, {
+  foreignKey: "createdByUserId",
+  as: "createdBy",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Conversation Message Relationships
+|--------------------------------------------------------------------------
+*/
+
+// SupportConversation ↔ ConversationMessage
+SupportConversation.hasMany(ConversationMessage, {
+  foreignKey: "conversationId",
+  as: "messages",
+});
+
+ConversationMessage.belongsTo(SupportConversation, {
+  foreignKey: "conversationId",
+  as: "conversation",
+});
+
+// School ↔ ConversationMessage
+School.hasMany(ConversationMessage, {
+  foreignKey: "schoolId",
+  as: "supportMessages",
+});
+
+ConversationMessage.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// User ↔ ConversationMessage (school user sender)
+User.hasMany(ConversationMessage, {
+  foreignKey: "senderUserId",
+  as: "sentSupportMessages",
+});
+
+ConversationMessage.belongsTo(User, {
+  foreignKey: "senderUserId",
+  as: "senderUser",
+});
+
+// PlatformUser ↔ ConversationMessage (platform sender)
+PlatformUser.hasMany(ConversationMessage, {
+  foreignKey: "senderPlatformUserId",
+  as: "sentSupportMessages",
+});
+
+ConversationMessage.belongsTo(PlatformUser, {
+  foreignKey: "senderPlatformUserId",
+  as: "senderPlatformUser",
+});
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -477,5 +591,9 @@ AttendanceRegister,
 AttendanceRecord,
 GateScanRecord,
 GateScanner,
-WorkingDay
+WorkingDay,
+Complaint,
+ PlatformUser,
+SupportConversation,
+  ConversationMessage,
 };
