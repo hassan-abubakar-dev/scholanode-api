@@ -26,6 +26,13 @@ import attendanceRouter from './routes/attendance.js';
 import gateSecurityRouter from './routes/gateSecurity.js';
 import gateScannerRoutes from "./routes/gateScanner.js";
 import compaintRouter from "./routes/complaint.js";
+import timetableRouter from "./routes/timetable.js";
+import supportRouter from "./routes/support.js";
+import platformSupportRouter from "./routes/platformSupport.js";
+import schoolInquiryRouter from "./routes/schoolInquiry.js";
+import platformContactInquiryRouter from "./routes/platformContactInquiry.js";
+import profileRouter from "./routes/profile.js";
+import announcementRouter from "./routes/announcement.js"
 
 
 
@@ -34,7 +41,33 @@ dotenv.config();
 
 const app = express();
 
-// before express.json() middleware, set up CORS to allow requests from http://localhost:5173
+// Comma-separated list of exact browser origins allowed in production.
+// Example: CLIENT_ORIGINS=https://app.scholanode.com,https://admin.scholanode.com
+const configuredOrigins = String(process.env.CLIENT_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+// In development the frontend may be opened from localhost, a LAN IP (phone
+// testing), or a tunnel, on any Vite port — so private-network origins are
+// allowed there. Production only accepts CLIENT_ORIGINS.
+const isLocalDevelopmentOrigin = (origin) => {
+  try {
+    const { hostname } = new URL(origin);
+
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+};
+
+// before express.json() middleware, set up CORS
 app.post(
     "/api/payments/webhook",
     express.raw({ type: "application/json" }),
@@ -46,22 +79,34 @@ app.post(
 // Middleware
 app.use(express.json());
 
-app.use(cors({
+app.use(
+  cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+      // Allow requests without an Origin header, such as Postman or curl.
+      if (!origin) return callback(null, true);
 
-        // This allows 'http://localhost:5173' and 'http://localhost:5173/'
-        if (origin.startsWith('http://localhost:5173')) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
+      const normalizedOrigin = origin.replace(/\/$/, "");
+
+      if (configuredOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      if (
+        process.env.NODE_ENV !== "production" &&
+        isLocalDevelopmentOrigin(normalizedOrigin)
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
     },
+
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 
 app.use(cookieParser());
 
@@ -88,24 +133,51 @@ app.use('/api/parents', parentRouter);
 app.use('/api/attendances', attendanceRouter);
 app.use('/api/gate-securities', gateSecurityRouter); 
 app.use("/api/gate-scanners", gateScannerRoutes);
-app.use("/api/complaints", compaintRouter);
+app.use("/api/complaints", compaintRouter); 
+app.use("/api/timetables", timetableRouter); 
+app.use("/api/supports", supportRouter);
+app.use("/api/platform-supports", platformSupportRouter);
+app.use("/api/school-inquiries", schoolInquiryRouter);
+app.use("/api/platform-contact-inquiries", platformContactInquiryRouter);
+app.use("/api/profiles", profileRouter)
+app.use("/api/announcements", announcementRouter);
+
+
 // error handle
 app.use(errorHandler);
 
 // Database Sync and Server Startup
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5000; 
 
 
 (async () => {
     try {
+        console.log("Testing database connection...");
         await testConnection();
-        await dbConnection.sync(); // Use { force: true } for development to drop and recreate tables
-        console.log('Database connected and models synced successfully.');
+
+        console.log("Synchronizing database models...");
+        await dbConnection.sync();
+
+        console.log("Database connected and models synced successfully.");
 
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
     } catch (err) {
-        console.error('Failed to start server:', err.message);
+        console.error("\n❌ Failed to start server");
+        console.error("Error name:", err.name);
+        console.error("Error message:", err.message);
+        console.error("Full error:", err);
+        console.error("Stack trace:\n", err.stack);
+
+        if (err.original) {
+            console.error("Original database error:", err.original);
+        }
+
+        if (err.parent) {
+            console.error("Parent database error:", err.parent);
+        }
+
+        process.exit(1);
     }
 })();

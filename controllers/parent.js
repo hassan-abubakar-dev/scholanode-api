@@ -2,14 +2,27 @@ import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 import { dbConnection } from "../config/db.js";
-import User from "../models/User.js";
-import Parent from "../models/Parent.js";
-import ParentStudent from "../models/ParentStudent.js";
-import Student from "../models/Student.js";
-import School from "../models/School.js";
+
 import { Op } from "sequelize";
+
+import {
+  School,
+  User,
+  Parent,
+  ParentStudent,
+  Student,
+  Class,
+  Session,
+  Term,
+  AttendanceRegister,
+  AttendanceRecord,
+} from "../relationships/associations.js";
+
 import AppError from '../utils/AppError.js';
 import sendEmail from '../config/emailService.js';
+import VerificationCode from "../models/VerificationCode.js";
+import generateVerificationCode from "../utils/verificationCode.js";
+import generateExpiryTime from "../utils/experyTime.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -25,6 +38,92 @@ const escapeHtml = (value) =>
     '"': "&quot;",
     "'": "&#39;",
   })[character]);
+
+
+
+  const CHILD_EMAIL_CHANGE_PURPOSE = "PROFILE_EMAIL_CHANGE";
+
+const getParentAndLinkedChild = async ({
+  parentUserId,
+  schoolId,
+  studentId,
+  transaction,
+}) => {
+  // Confirm the authenticated user has an active Parent profile.
+  const parent = await Parent.findOne({
+    where: {
+      userId: parentUserId,
+      schoolId,
+      status: "ACTIVE",
+    },
+    include: [
+      {
+        model: User,
+        as: "user",
+        required: true,
+        where: {
+          id: parentUserId,
+          schoolId,
+          role: "PARENT",
+          status: "ACTIVE",
+        },
+      },
+    ],
+    transaction,
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+  });
+
+  if (!parent) {
+    throw new AppError("Active parent account not found.", 403);
+  }
+
+  // Confirm the child belongs to the same school and is linked
+  // to this exact parent.
+  const relationship = await ParentStudent.findOne({
+    where: {
+      schoolId,
+      parentId: parent.id,
+      studentId,
+    },
+    include: [
+      {
+        model: Student,
+        as: "student",
+        required: true,
+        where: { schoolId },
+        include: [
+          {
+            model: User,
+            as: "user",
+            required: true,
+            where: {
+              schoolId,
+              role: "STUDENT",
+            },
+          },
+        ],
+      },
+    ],
+    transaction,
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+  });
+
+  if (!relationship?.student?.user) {
+    throw new AppError(
+      "The selected student is not linked to your parent account.",
+      404
+    );
+  }
+
+  return {
+    parent,
+    parentUser: parent.user,
+    student: relationship.student,
+    childUser: relationship.student.user,
+  };
+};
+
+
 
 export const createParent = async (req, res, next) => {
   let transaction;
@@ -1286,6 +1385,514 @@ export const deleteParent = async (req, res, next) => {
   } catch (error) {
     if (error instanceof AppError) {
       return next(error);
+    }
+
+    return next(error);
+  }
+};
+
+
+
+export const getParentDashboard = async (req, res, next) => {
+  try {
+    const { schoolId, id: userId, role } = req.user ?? {};
+
+    if (!schoolId || !userId) {
+      return next(new AppError("Authentication is required.", 401));
+    }
+
+    if (role !== "PARENT") {
+      return next(
+        new AppError(
+          "Only parent accounts can access this dashboard.",
+          403
+        )
+      );
+    }
+
+    // 1. Find the authenticated parent's active profile.
+    const parent = await Parent.findOne({
+      where: {
+        schoolId,
+        userId,
+        status: "ACTIVE",
+      },
+      attributes: ["id", "userId"],
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: [
+            "firstName",
+            "surName",
+            "profileImageUrl",
+          ],
+          required: true,
+          where: {
+            schoolId,
+            role: "PARENT",
+            status: "ACTIVE",
+          },
+        },
+      ],
+    });
+
+    if (!parent) {
+      return next(
+        new AppError(
+          "Your active parent profile could not be found.",
+          404
+        )
+      );
+    }
+
+    // 2. Retrieve all children linked to this parent.
+    // Include every admission status and allow a missing current class.
+    const relationships = await ParentStudent.findAll({
+      where: {
+        schoolId,
+        parentId: parent.id,
+      },
+      attributes: [
+        "studentId",
+        "relationship",
+        "receivesNotifications",
+      ],
+      include: [
+        {
+          model: Student,
+          as: "student",
+          attributes: [
+            "id",
+            "admissionNumber",
+            "qrToken",
+            "currentClassId",
+            "admissionStatus",
+          ],
+          required: true,
+          where: { schoolId },
+          include: [
+            {
+              model: User,
+              as: "user",
+              attributes: ["firstName", "surName", "email"],
+              required: true,
+              where: { schoolId },
+            },
+            {
+              model: Class,
+              as: "currentClass",
+              attributes: ["id", "classLevel", "arm"],
+              required: false,
+              where: { schoolId },
+            },
+          ],
+        },
+      ],
+      order: [
+        ["createdAt", "ASC"],
+        ["studentId", "ASC"],
+      ],
+    });
+
+    // 3. Identify the school's current active session and term.
+    const session = await Session.findOne({
+      where: {
+        schoolId,
+        status: "ACTIVE",
+        isCurrent: true,
+      },
+      attributes: ["id", "sessionName"],
+    });
+
+    let term = null;
+
+    if (session) {
+      term = await Term.findOne({
+        where: {
+          sessionId: session.id,
+          status: "ACTIVE",
+          isCurrent: true,
+        },
+        attributes: ["id", "termName"],
+      });
+    }
+
+    // 4. Initialize attendance summaries for every linked child.
+    const attendanceByStudent = new Map();
+
+    for (const relationship of relationships) {
+      const student = relationship.student;
+
+      attendanceByStudent.set(student.id, {
+        available: Boolean(session && term),
+        presentDays: 0,
+        absentDays: 0,
+        totalRecordedDays: 0,
+        percentage: null,
+      });
+    }
+
+    const studentIds = relationships.map(
+      (relationship) => relationship.student.id
+    );
+
+    // 5. Fetch attendance for ALL linked children in one query.
+    // Only confirmed records in submitted registers count.
+    if (session && term && studentIds.length > 0) {
+      const attendanceRecords = await AttendanceRecord.findAll({
+        attributes: ["studentId", "status"],
+        where: {
+          studentId: {
+            [Op.in]: studentIds,
+          },
+          status: {
+            [Op.in]: ["PRESENT", "ABSENT"],
+          },
+        },
+        include: [
+          {
+            model: AttendanceRegister,
+            as: "attendanceRegister",
+            attributes: [],
+            required: true,
+            where: {
+              schoolId,
+              sessionId: session.id,
+              termId: term.id,
+              status: "SUBMITTED",
+            },
+          },
+        ],
+      });
+
+      // 6. Aggregate the results in memory.
+      for (const record of attendanceRecords) {
+        const attendance = attendanceByStudent.get(
+          record.studentId
+        );
+
+        // Ignore any record not belonging to our initialized students.
+        if (!attendance) continue;
+
+        if (record.status === "PRESENT") {
+          attendance.presentDays += 1;
+        } else if (record.status === "ABSENT") {
+          attendance.absentDays += 1;
+        }
+      }
+
+      // 7. Calculate each child's attendance percentage.
+      for (const attendance of attendanceByStudent.values()) {
+        attendance.totalRecordedDays =
+          attendance.presentDays + attendance.absentDays;
+
+        attendance.percentage =
+          attendance.totalRecordedDays > 0
+            ? Math.round(
+                (attendance.presentDays /
+                  attendance.totalRecordedDays) *
+                  1000
+              ) / 10
+            : null;
+      }
+    }
+
+    // 8. Build the dashboard response.
+    const children = relationships.map((relationship) => {
+      const student = relationship.student;
+
+      return {
+        id: student.id,
+        firstName: student.user.firstName,
+        surName: student.user.surName,
+        admissionNumber: student.admissionNumber,
+        email: student.user.email,
+        qrToken: student.qrToken,
+        admissionStatus: student.admissionStatus,
+
+        class: student.currentClass
+          ? {
+              id: student.currentClass.id,
+              classLevel: student.currentClass.classLevel,
+              arm: student.currentClass.arm,
+            }
+          : null,
+
+        relationship: relationship.relationship,
+        receivesNotifications:
+          relationship.receivesNotifications,
+
+        attendance: attendanceByStudent.get(student.id),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Parent dashboard retrieved successfully.",
+      data: {
+        parent: {
+          firstName: parent.user.firstName,
+          surName: parent.user.surName,
+          profileImageUrl: parent.user.profileImageUrl,
+        },
+
+        summary: {
+          childrenCount: children.length,
+        },
+
+        attendancePeriod:
+          session && term
+            ? {
+                sessionName: session.sessionName,
+                termName: term.termName,
+              }
+            : null,
+
+        children,
+      },
+    });
+  } catch (error) {
+    console.error("GET_PARENT_DASHBOARD_ERROR:", {
+      schoolId: req.user?.schoolId,
+      userId: req.user?.id,
+      error,
+    });
+
+    return next(
+      error instanceof AppError
+        ? error
+        : new AppError(
+            isDev
+              ? error.message
+              : "Unable to retrieve the parent dashboard. Please try again.",
+            500
+          )
+    );
+  }
+};
+
+
+export const requestChildEmailChange = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { newEmail, currentPassword } = req.body;
+
+    const schoolId = req.user?.schoolId;
+    const parentUserId = req.user?.id;
+
+    if (!schoolId || !parentUserId) {
+      throw new AppError("Authentication is required.", 401);
+    }
+
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
+    const { parentUser, childUser } = await getParentAndLinkedChild({
+      parentUserId,
+      schoolId,
+      studentId,
+    });
+
+    // Reauthenticate the parent, not the child.
+    const passwordMatches = await bcrypt.compare(
+      currentPassword,
+      parentUser.passwordHash
+    );
+
+    if (!passwordMatches) {
+      throw new AppError("Your current password is incorrect.", 401);
+    }
+
+    if (childUser.email?.trim().toLowerCase() === normalizedEmail) {
+      throw new AppError(
+        "This is already the student's email address.",
+        400
+      );
+    }
+
+    // Email addresses must be unique across the entire platform.
+    const existingUser = await User.findOne({
+      where: {
+        email: normalizedEmail,
+        id: { [Op.ne]: childUser.id },
+      },
+    });
+
+    if (existingUser) {
+      throw new AppError(
+        "This email address is already in use.",
+        409
+      );
+    }
+
+    const code = String(generateVerificationCode()).padStart(6, "0");
+    const expiryTime = generateExpiryTime();
+
+    // Replace only the child's previous email-change code.
+    // Do not delete password-reset or other verification codes.
+    await VerificationCode.destroy({
+      where: {
+        userId: childUser.id,
+        purpose: CHILD_EMAIL_CHANGE_PURPOSE,
+      },
+    });
+
+    await VerificationCode.create({
+      code,
+      expiryTime,
+      userEmail: normalizedEmail,
+      userId: childUser.id,
+      purpose: CHILD_EMAIL_CHANGE_PURPOSE,
+    });
+
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Verify your child's new ScholaNode email address",
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+            <h2 style="color:#071A52;">ScholaNode Email Verification</h2>
+            <p>Hello ${escapeHtml(parentUser.firstName)},</p>
+            <p>
+              A request was made to change the email address of your
+              linked child's ScholaNode account.
+            </p>
+            <p>Your verification code is:</p>
+            <h1 style="letter-spacing:6px;color:#071A52;">${code}</h1>
+            <p>
+              This code expires soon. If you did not request this change,
+              you can ignore this email.
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailError) {
+      // Remove only the code created by this request.
+      await VerificationCode.destroy({
+        where: {
+          userId: childUser.id,
+          userEmail: normalizedEmail,
+          code,
+          purpose: CHILD_EMAIL_CHANGE_PURPOSE,
+        },
+      });
+
+      throw emailError;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "A verification code has been sent to the new email address.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const verifyChildEmailChange = async (req, res, next) => {
+  let transaction;
+
+  try {
+    const { studentId } = req.params;
+    const { newEmail, code } = req.body;
+
+    const schoolId = req.user?.schoolId;
+    const parentUserId = req.user?.id;
+
+    if (!schoolId || !parentUserId) {
+      throw new AppError("Authentication is required.", 401);
+    }
+
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
+    transaction = await dbConnection.transaction();
+
+    // Recheck the parent-child relationship during verification.
+    const { childUser } = await getParentAndLinkedChild({
+      parentUserId,
+      schoolId,
+      studentId,
+      transaction,
+    });
+
+    const verification = await VerificationCode.findOne({
+      where: {
+        userId: childUser.id,
+        userEmail: normalizedEmail,
+        code,
+        purpose: CHILD_EMAIL_CHANGE_PURPOSE,
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!verification) {
+      throw new AppError(
+        "Invalid verification code or email address.",
+        400
+      );
+    }
+
+    if (Number(verification.expiryTime) <= Date.now()) {
+      throw new AppError(
+        "This verification code has expired. Please request a new code.",
+        400
+      );
+    }
+
+    if (childUser.email?.trim().toLowerCase() === normalizedEmail) {
+      throw new AppError(
+        "This is already the student's email address.",
+        400
+      );
+    }
+
+    // Check availability again because another account may have
+    // registered this email since the code was requested.
+    const existingUser = await User.findOne({
+      where: {
+        email: normalizedEmail,
+        id: { [Op.ne]: childUser.id },
+      },
+      transaction,
+    });
+
+    if (existingUser) {
+      throw new AppError(
+        "This email address is already in use.",
+        409
+      );
+    }
+
+    // Update the child's User record only after successful verification.
+    await childUser.update(
+      { email: normalizedEmail },
+      { transaction }
+    );
+
+    // Consume all email-change codes for this child only.
+    await VerificationCode.destroy({
+      where: {
+        userId: childUser.id,
+        purpose: CHILD_EMAIL_CHANGE_PURPOSE,
+      },
+      transaction,
+    });
+
+    await transaction.commit();
+    transaction = null;
+
+    return res.status(200).json({
+      success: true,
+      message: "Your child's email address has been updated successfully.",
+      data: {
+        studentId,
+        email: normalizedEmail,
+      },
+    });
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
     }
 
     return next(error);

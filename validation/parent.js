@@ -220,3 +220,22 @@ export const importParentsSchema = Joi.object({
 })
   .required()
   .unknown(false);
+
+  export const childEmailChangeParamsSchema = Joi.object({
+  studentId: Joi.string().uuid().required(),
+}).unknown(false);
+
+export const requestChildEmailChangeSchema = Joi.object({
+  newEmail: Joi.string().trim().email().max(100).required(),
+  currentPassword: Joi.string().min(1).required(),
+}).unknown(false);
+
+export const verifyChildEmailChangeSchema = Joi.object({
+  newEmail: Joi.string().trim().email().max(100).required(),
+  code: Joi.string()
+    .pattern(/^\d{6}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Verification code must contain exactly 6 digits.",
+    }),
+}).unknown(false);

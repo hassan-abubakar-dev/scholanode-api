@@ -6,7 +6,8 @@ import {
   forgotPassword,
   resetPassword,
   requestNewAccessToken,
-  logOutUser
+  logOutUser,
+  changePassword 
 } from "../controllers/auth.js";
 import { protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
@@ -15,7 +16,9 @@ import {
   forgotLoginIdValidationSchema,
   forgotPasswordValidationSchema,
   resetPasswordValidationSchema,
+  changePasswordSchema 
 } from "../validation/auth.js";
+
 
 const router = express.Router();
 
@@ -45,5 +48,12 @@ router.post(
 );
 
 router.post('/log-out', protectRoutes, logOutUser);
+
+router.patch(
+  "/change-password",
+  protectRoutes,
+  validate(changePasswordSchema, "body"),
+  changePassword
+);
 
 export default router;

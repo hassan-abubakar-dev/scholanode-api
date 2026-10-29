@@ -48,3 +48,25 @@ export const resetPasswordValidationSchema = Joi.object({
     "any.required": "Reset token is required.",
   }),
 }).required();
+
+
+export const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string() 
+    .required()
+    .messages({
+      "string.empty": "Current password is required.",
+      "any.required": "Current password is required.",
+    }),
+
+  newPassword: Joi.string()
+    .min(8)
+    .invalid(Joi.ref("currentPassword"))
+    .required()
+    .messages({
+      "string.empty": "New password is required.",
+      "string.min": "New password must be at least 8 characters long.",
+      "any.only": "New password must be different from your current password.",
+      "any.invalid": "New password must be different from your current password.",
+      "any.required": "New password is required.",
+    }),
+}).required();

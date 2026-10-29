@@ -1,8 +1,5 @@
 import { DataTypes } from "sequelize";
-import dotenv from "dotenv";
 import { dbConnection } from "../config/db.js";
-
-dotenv.config();
 
 const Announcement = dbConnection.define(
     "Announcement",
@@ -12,6 +9,10 @@ const Announcement = dbConnection.define(
             defaultValue: DataTypes.UUIDV4,
             primaryKey: true,
         },
+
+        // =====================================
+        // SCHOOL
+        // =====================================
 
         schoolId: {
             type: DataTypes.UUID,
@@ -23,9 +24,9 @@ const Announcement = dbConnection.define(
             allowNull: false,
         },
 
-        // ===============================
+        // =====================================
         // ANNOUNCEMENT INFORMATION
-        // ===============================
+        // =====================================
 
         title: {
             type: DataTypes.STRING(200),
@@ -44,22 +45,18 @@ const Announcement = dbConnection.define(
             },
         },
 
-        // ===============================
+        // =====================================
         // TARGET AUDIENCE
-        // ===============================
+        // =====================================
 
         audience: {
-            type: DataTypes.ARRAY(
-                DataTypes.ENUM(
-                    "STAFF",
-                    "STUDENTS",
-                    "PARENTS"
-                )
+            type: DataTypes.ENUM(
+                "STAFF",
+                "STUDENTS",
+                "PARENTS",
+                "SECURITY"
             ),
             allowNull: false,
-            validate: {
-                notEmpty: true,
-            },
         },
     },
     {
@@ -68,13 +65,10 @@ const Announcement = dbConnection.define(
 
         indexes: [
             {
-                fields: ["schoolId"],
+                fields: ["schoolId", "createdAt"],
             },
             {
                 fields: ["createdBy"],
-            },
-            {
-                fields: ["createdAt"],
             },
         ],
     }

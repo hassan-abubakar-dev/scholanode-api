@@ -24,7 +24,15 @@ import Complaint from "../models/Complaint.js";
 import PlatformUser from "../models/PlatformUser.js";
 import SupportConversation from "../models/SupportConversation.js";
 import ConversationMessage from "../models/ConversationMessage.js";
+// timetable models
+import TimetablePeriod from "../models/TimetablePeriod.js";
+import TimetableLesson from "../models/TimetableLesson.js";
 
+import SchoolInquiry from "../models/SchoolInquiry.js";
+import PlatformContactInquiry from "../models/PlatformContactInquiry.js";
+
+import Notification from "../models/Notification.js";
+import Announcement from "../models/Announcement.js";
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -128,7 +136,7 @@ Student.belongsTo(User, {
 |--------------------------------------------------------------------------
 */
 
-// A Class has many Students
+// A Class has many Students 
 Class.hasMany(Student, {
   foreignKey: "currentClassId",
   as: "students",
@@ -568,6 +576,187 @@ ConversationMessage.belongsTo(PlatformUser, {
   as: "senderPlatformUser",
 });
 
+// PlatformUser ↔ SupportConversation (current handler)
+PlatformUser.hasMany(SupportConversation, {
+  foreignKey: "currentHandlerId",
+  as: "handledSupportConversations",
+});
+
+SupportConversation.belongsTo(PlatformUser, {
+  foreignKey: "currentHandlerId",
+  as: "currentHandler",
+});
+
+// PlatformUser ↔ SupportConversation (who escalated it)
+PlatformUser.hasMany(SupportConversation, {
+  foreignKey: "escalatedBy",
+  as: "escalatedSupportConversations",
+});
+
+SupportConversation.belongsTo(PlatformUser, {
+  foreignKey: "escalatedBy",
+  as: "escalatedByUser",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Timetable Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ TimetablePeriod
+School.hasMany(TimetablePeriod, {
+  foreignKey: "schoolId",
+  as: "timetablePeriods",
+});
+
+TimetablePeriod.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// School ↔ TimetableLesson
+School.hasMany(TimetableLesson, {
+  foreignKey: "schoolId",
+  as: "timetableLessons",
+});
+
+TimetableLesson.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// Class ↔ TimetableLesson
+Class.hasMany(TimetableLesson, {
+  foreignKey: "classId",
+  as: "timetableLessons",
+});
+
+TimetableLesson.belongsTo(Class, {
+  foreignKey: "classId",
+  as: "class",
+});
+
+// TimetablePeriod ↔ TimetableLesson
+TimetablePeriod.hasMany(TimetableLesson, {
+  foreignKey: "periodId",
+  as: "lessons",
+});
+
+TimetableLesson.belongsTo(TimetablePeriod, {
+  foreignKey: "periodId",
+  as: "period",
+});
+
+// Subject ↔ TimetableLesson
+Subject.hasMany(TimetableLesson, {
+  foreignKey: "subjectId",
+  as: "timetableLessons",
+});
+
+TimetableLesson.belongsTo(Subject, {
+  foreignKey: "subjectId",
+  as: "subject",
+});
+
+// User ↔ TimetableLesson (assigned teacher)
+User.hasMany(TimetableLesson, {
+  foreignKey: "teacherId",
+  as: "timetableLessons",
+});
+
+TimetableLesson.belongsTo(User, {
+  foreignKey: "teacherId",
+  as: "teacher",
+});
+
+// SchoolInquiry Relationships
+School.hasMany(SchoolInquiry, {
+  foreignKey: "schoolId",
+  as: "inquiries",
+});
+
+SchoolInquiry.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+
+// ===============================
+// PLATFORM CONTACT INQUIRIES
+// ===============================
+
+// A platform user can review multiple contact inquiries.
+PlatformUser.hasMany(PlatformContactInquiry, {
+  foreignKey: "reviewedByPlatformUserId",
+  as: "reviewedContactInquiries",
+  onDelete: "SET NULL",
+  onUpdate: "CASCADE",
+});
+
+// Each inquiry can have one reviewer, or no reviewer yet.
+PlatformContactInquiry.belongsTo(PlatformUser, {
+  foreignKey: "reviewedByPlatformUserId",
+  as: "reviewer",
+  onDelete: "SET NULL",
+  onUpdate: "CASCADE",
+});
+
+/*
+|--------------------------------------------------------------------------
+| Notification Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ Notification
+School.hasMany(Notification, {
+  foreignKey: "schoolId",
+  as: "notifications",
+});
+
+Notification.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// User ↔ Notification (recipient of individual notifications)
+User.hasMany(Notification, {
+  foreignKey: "recipientUserId",
+  as: "receivedNotifications",
+});
+
+Notification.belongsTo(User, {
+  foreignKey: "recipientUserId",
+  as: "recipient",
+});
+
+
+// =====================================
+// ANNOUNCEMENT RELATIONSHIPS
+// =====================================
+
+// School ↔ Announcement
+School.hasMany(Announcement, {
+    foreignKey: "schoolId",
+    as: "announcements",
+});
+
+Announcement.belongsTo(School, {
+    foreignKey: "schoolId",
+    as: "school",
+});
+
+// User ↔ Announcement (creator)
+User.hasMany(Announcement, {
+    foreignKey: "createdBy",
+    as: "createdAnnouncements",
+});
+
+Announcement.belongsTo(User, {
+    foreignKey: "createdBy",
+    as: "creator",
+});
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -596,4 +785,10 @@ Complaint,
  PlatformUser,
 SupportConversation,
   ConversationMessage,
+TimetablePeriod,
+  TimetableLesson,
+  SchoolInquiry,
+  PlatformContactInquiry,
+  Notification,
+  Announcement
 };

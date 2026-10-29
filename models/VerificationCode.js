@@ -1,30 +1,45 @@
-import { DataTypes, UUIDV4 } from "sequelize";
-import {dbConnection} from "../config/db.js";
-
+import { DataTypes } from "sequelize";
+import { dbConnection } from "../config/db.js";
 
 const VerificationCode = dbConnection.define(
-    'VerificationCode',
+    "VerificationCode",
     {
-        
         code: {
             type: DataTypes.STRING(6),
-            allowNull: false
+            allowNull: false,
         },
+
         expiryTime: {
             type: DataTypes.BIGINT,
-            allowNull: false
+            allowNull: false,
         },
+
         userEmail: {
-            type: DataTypes.STRING(45),
-            allowNull: false
-        }
+            type: DataTypes.STRING(100),
+            allowNull: false,
+        },
+
+        // Null remains valid for existing password-recovery records.
+        userId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+        },
+
+        purpose: {
+            type: DataTypes.ENUM(
+                "PASSWORD_RESET",
+                "PROFILE_EMAIL_CHANGE",
+                "SCHOOL_REGISTRATION"
+            ),
+            allowNull: false,
+            defaultValue: "PASSWORD_RESET",
+        },
     },
     {
-        tableName: 'verificationCodes',
+        tableName: "verificationCodes",
         timestamps: true,
-        underscored: true
+        underscored: true,
     }
-    
 );
 
 export default VerificationCode;

@@ -1061,3 +1061,72 @@ export const logOutUser = async (req, res, next) => {
     );
   }
 };
+
+export const changePassword = async (req, res, next) => {
+  try {
+    // 1. Get the authenticated user.
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return next(
+        new AppError("Authentication is required.", 401)
+      );
+    }
+
+    // 2. Read validated request data.
+    const { currentPassword, newPassword } = req.body;
+
+    // 3. Find the authenticated user's account.
+    const user = await User.findByPk(userId);
+
+    if (!user) {
+      return next(
+        new AppError("User account not found.", 404)
+      );
+    }
+
+    // 4. Verify the current password.
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash
+    );
+
+    if (!isPasswordValid) {
+      return next(
+        new AppError("Your current password is incorrect.", 400)
+      );
+    }
+
+    // 5. Prevent reusing the current password.
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      return next(
+        new AppError(
+          "Your new password must be different from your current password.",
+          400
+        )
+      );
+    }
+
+    // 6. Hash and save the new password.
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await user.update({
+      passwordHash,
+      mustChangePassword: false,
+    });
+
+    // 7. Return confirmation without exposing password data.
+    return res.status(200).json({
+      status: "success",
+      message: "Your password has been changed successfully.",
+    });
+  } catch (error) {
+    console.error("CHANGE_PASSWORD_ERROR:", {
+      url: req.originalUrl,
+      method: req.method,
+      error,
+    });
+
+    return next(error);
+  }
+};

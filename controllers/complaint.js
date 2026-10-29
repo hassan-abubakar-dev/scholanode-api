@@ -70,6 +70,21 @@ export const createComplaint = async (req, res, next) => {
 
     if (!schoolId) return;
 
+    const restrictedRoles = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+];
+
+if (restrictedRoles.includes(req.user.role)) {
+  return next(
+    new AppError(
+      "School administrators cannot submit complaints to their own school.",
+      403
+    )
+  );
+}
+
     const {
       category,
       subject,
@@ -108,6 +123,21 @@ export const getMyComplaints = async (req, res, next) => {
     const schoolId = getSchoolId(req, next);
 
     if (!schoolId) return;
+
+    const restrictedRoles = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+];
+
+if (restrictedRoles.includes(req.user.role)) {
+  return next(
+    new AppError(
+      "School administrators cannot access personal school complaints.",
+      403
+    )
+  );
+}
 
     const status = req.query.status || undefined;
     const page = Number(req.query.page) || 1;

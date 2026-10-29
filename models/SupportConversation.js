@@ -42,15 +42,6 @@ const SupportConversation = dbConnection.define(
       allowNull: false,
     },
 
-    subject: {
-      type: DataTypes.STRING(150),
-      allowNull: false,
-      validate: {
-        notEmpty: true,
-        len: [3, 150],
-      },
-    },
-
     // ===============================
     // CONVERSATION MANAGEMENT
     // ===============================
@@ -59,12 +50,43 @@ const SupportConversation = dbConnection.define(
       type: DataTypes.ENUM(
         "OPEN",
         "IN_PROGRESS",
-        "ESCALATED",
         "RESOLVED",
         "CLOSED"
       ),
       allowNull: false,
       defaultValue: "OPEN",
+    },
+
+    // Internal flag indicating that super-admin attention is needed.
+    isEscalated: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    // Platform agent currently handling the conversation.
+    // Null means nobody is currently handling it.
+    currentHandlerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    // Platform agent who last escalated the conversation.
+    escalatedBy: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    // When the conversation was escalated.
+    escalatedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    // Internal explanation for escalation.
+    escalationReason: {
+      type: DataTypes.TEXT,
+      allowNull: true,
     },
 
     // When the conversation was marked as resolved.
@@ -92,6 +114,12 @@ const SupportConversation = dbConnection.define(
       },
       {
         fields: ["schoolId", "category"],
+      },
+      {
+        fields: ["status", "isEscalated", "createdAt"],
+      },
+      {
+        fields: ["currentHandlerId", "status"],
       },
     ],
   }
