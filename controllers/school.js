@@ -48,6 +48,50 @@ export const checkSchoolCode = async (req, res, next) => {
   }
 };
 
+export const getSchoolByCode = async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const school = await School.findOne({
+      where: {
+        schoolCode: code.trim().toUpperCase(),
+        status: {
+          [Op.in]: ['ACTIVE', 'PENDING_ACTIVATION'],
+        },
+      },
+      attributes: [
+        'schoolName',
+        'schoolCode',
+        'schoolLevel',
+        'ownershipType',
+        'logoKey',
+        'welcomeMessage',
+        'supportEmail',
+        'supportPhone',
+      ],
+    });
+
+    if (!school) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'School not found.',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: school,
+    });
+  } catch (error) {
+    console.error('Get school by code error:', error);
+
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch school.',
+    });
+  }
+};
+
 /**
  * Register a new school with admin user and plan
  * Request body: { school, admin, plan }
@@ -710,39 +754,7 @@ export const getSchoolSetupProgress = async (req, res, next) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-export const getSchoolByCode = async (req, res) => {
-  try {
-    const { code } = req.params;
 
-    const school = await School.findOne({
-      where: {
-        schoolCode: code.trim().toUpperCase(),
-        status: {
-          [Op.in]: ['ACTIVE', 'PENDING_ACTIVATION'],
-        },
-      },
-    });
-
-    if (!school) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'School not found.',
-      });
-    }
-
-    return res.status(200).json({
-      status: 'success',
-      data: school,
-    });
-  } catch (error) {
-    console.error('Get school by code error:', error);
-
-    return res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch school.',
-    });
-  }
-};
 
 
 // Get the authenticated user's school

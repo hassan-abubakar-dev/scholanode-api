@@ -1,204 +1,162 @@
+import { Op } from "sequelize";
 
 import {
+  Owner,
   SupportConversation,
   ConversationMessage,
 } from "../relationships/associations.js";
 
 import { dbConnection } from "../config/db.js";
+
 import AppError from "../utils/AppError.js";
-import { Op } from "sequelize";
 
 // ==========================================
-// CONFIGURATION
+// CONSTANTS
 // ==========================================
 
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-const MAX_MESSAGE_LENGTH = 10000;
-
-const CLOSED_STATUSES = ["RESOLVED", "CLOSED"];
-
-// Adjust this list if your application uses a different authorization policy.
-const SUPPORT_ALLOWED_ROLES = [
-  "OWNER",
+const supportRoles = [
   "LEADER",
+  "VICE_LEADER",
   "ADMINISTRATOR",
+  "EXAM_OFFICER",
 ];
 
 // ==========================================
 // HELPERS
 // ==========================================
 
-const getSchoolUser = (req) => {
-  const userId = req.user?.id;
-  const schoolId = req.user?.schoolId;
-
-  if (!userId || !schoolId) {
-    throw new AppError(
-      "Authenticated school user information is missing.",
-      401
+// Ensure the user belongs to a school.
+const getSchoolId = (req, next) => {
+  if (!req.user?.schoolId) {
+    next(
+      new AppError(
+        "Your account is not associated with a school.",
+        403
+      )
     );
+
+    return null;
   }
 
-  return { userId, schoolId };
+  return req.user.schoolId;
 };
 
-const hasSupportAccess = (req) => {
-  const role = req.user?.role;
-  const roles = Array.isArray(req.user?.roles)
-    ? req.user.roles
-    : [];
+// ==========================================
+// SUPPORT AUTHORIZATION
+// ==========================================
 
-  const assignedRoles = [
-    ...(role ? [role] : []),
-    ...roles,
-  ];
+// Allows authorized administrators and school owners.
+// Owners are identified through the Owners table.
 
-  return assignedRoles.some((assignedRole) =>
-    SUPPORT_ALLOWED_ROLES.includes(assignedRole)
-  );
-};
+export const authorizeSupportAccess = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    if (!req.user?.schoolId) {
+      return next(
+        new AppError(
+          "Your account is not associated with a school.",
+          403
+        )
+      );
+    }
 
-const requireSupportAccess = (req) => {
-  if (!hasSupportAccess(req)) {
-    throw new AppError(
-      "You are not authorized to access Help & Support.",
-      403
-    );
+    // Regular school administrators.
+    if (supportRoles.includes(req.user.role)) {
+      return next();
+    }
+
+    // Check whether the authenticated user owns this school.
+    const owner = await Owner.findOne({
+      where: {
+        userId: req.user.id,
+        schoolId: req.user.schoolId,
+      },
+    });
+
+    if (!owner) {
+      return next(
+        new AppError(
+          "You are not authorized to access Help & Support.",
+          403
+        )
+      );
+    }
+
+    return next();
+  } catch (error) {
+    return next(error);
   }
 };
 
-const getPagination = (query, defaultLimit = DEFAULT_PAGE_SIZE) => {
-  const parsedPage = Number(query.page ?? 1);
-  const parsedLimit = Number(query.limit ?? defaultLimit);
+// ==========================================
+// FIND MY CONVERSATION
+// ==========================================
 
-  const page = Number.isInteger(parsedPage) && parsedPage > 0
-    ? parsedPage
-    : 1;
+// Every school-facing conversation lookup must verify:
+// 1. Conversation ID.
+// 2. School ID.
+// 3. Initiating user ID.
 
-  const limit =
-    Number.isInteger(parsedLimit) && parsedLimit > 0
-      ? Math.min(parsedLimit, MAX_PAGE_SIZE)
-      : defaultLimit;
-
-  return {
-    page,
-    limit,
-    offset: (page - 1) * limit,
-  };
-};
-
-const getMessageContent = (body) => {
-  const message =
-    typeof body.message === "string" && body.message.trim()
-      ? body.message.trim()
-      : null;
-
-  const imageUrl =
-    typeof body.imageUrl === "string" && body.imageUrl.trim()
-      ? body.imageUrl.trim()
-      : null;
-
-  const imageKey =
-    typeof body.imageKey === "string" && body.imageKey.trim()
-      ? body.imageKey.trim()
-      : null;
-
-  if (!message && !imageUrl) {
-    throw new AppError(
-      "Please provide a message or an image attachment.",
-      400
-    );
-  }
-
-  if (message && message.length > MAX_MESSAGE_LENGTH) {
-    throw new AppError(
-      `Message cannot exceed ${MAX_MESSAGE_LENGTH} characters.`,
-      400
-    );
-  }
-
-  // An image key without a URL, or a URL without a key, is rejected.
-  if (Boolean(imageUrl) !== Boolean(imageKey)) {
-    throw new AppError(
-      "The image attachment is invalid. Please upload it again.",
-      400
-    );
-  }
-
-  return { message, imageUrl, imageKey };
-};
-
-const findMyConversation = async ({
+const findMyConversation = async (
   conversationId,
   schoolId,
-  userId,
-  transaction,
-  lock,
-}) => {
-  const conversation = await SupportConversation.findOne({
+  userId
+) => {
+  return SupportConversation.findOne({
     where: {
       id: conversationId,
       schoolId,
       createdByUserId: userId,
     },
-    transaction,
-    ...(lock && transaction
-      ? { lock: transaction.LOCK.UPDATE }
-      : {}),
   });
-
-  if (!conversation) {
-    throw new AppError("Support conversation not found.", 404);
-  }
-
-  return conversation;
-};
-
-const rollbackIfNeeded = async (transaction) => {
-  if (transaction && !transaction.finished) {
-    await transaction.rollback();
-  }
 };
 
 // ==========================================
 // 1. CREATE CONVERSATION
 // ==========================================
 
-export const createConversation = async (req, res, next) => {
-  let transaction;
+export const createConversation = async (
+  req,
+  res,
+  next
+) => {
+  const transaction = await dbConnection.transaction();
 
   try {
-    requireSupportAccess(req);
+    const schoolId = getSchoolId(req, next);
 
-    const { userId, schoolId } = getSchoolUser(req);
-    const { category } = req.body;
-    const { message, imageUrl, imageKey } =
-      getMessageContent(req.body);
+    if (!schoolId) {
+      await transaction.rollback();
+      return;
+    }
 
-    transaction = await dbConnection.transaction();
+    const {
+      category,
+      message,
+    } = req.body;
 
+    // Create the conversation.
     const conversation = await SupportConversation.create(
       {
         schoolId,
-        createdByUserId: userId,
+        createdByUserId: req.user.id,
         category,
         status: "OPEN",
-        isEscalated: false,
-        currentHandlerId: null,
       },
       { transaction }
     );
 
-    const firstMessage = await ConversationMessage.create(
+    // Create the initial message.
+    const initialMessage = await ConversationMessage.create(
       {
         conversationId: conversation.id,
         schoolId,
-        senderUserId: userId,
+        senderUserId: req.user.id,
         senderPlatformUserId: null,
         message,
-        imageUrl,
-        imageKey,
       },
       { transaction }
     );
@@ -210,16 +168,11 @@ export const createConversation = async (req, res, next) => {
       message: "Support conversation created successfully.",
       data: {
         conversation,
-        firstMessage,
+        message: initialMessage,
       },
     });
   } catch (error) {
-    try {
-      await rollbackIfNeeded(transaction);
-    } catch (rollbackError) {
-      return next(rollbackError);
-    }
-
+    await transaction.rollback();
     return next(error);
   }
 };
@@ -230,85 +183,42 @@ export const createConversation = async (req, res, next) => {
 
 export const getMyConversations = async (req, res, next) => {
   try {
-    requireSupportAccess(req);
+    const schoolId = getSchoolId(req, next);
 
-    const { userId, schoolId } = getSchoolUser(req);
-    const { page, limit, offset } = getPagination(req.query);
+    if (!schoolId) return;
+
+    const {
+      status,
+      category,
+      page: queryPage = 1,
+      limit: queryLimit = 20,
+    } = req.query;
+
+    const page = Number(queryPage);
+    const limit = Number(queryLimit);
+    const offset = (page - 1) * limit;
 
     const where = {
       schoolId,
-      createdByUserId: userId,
+      createdByUserId: req.user.id,
     };
 
-    if (req.query.status) {
-      where.status = req.query.status;
-    }
+    if (status) where.status = status;
+    if (category) where.category = category;
 
-    if (req.query.category) {
-      where.category = req.query.category;
-    }
-
-    const { count, rows: conversations } =
+    const { count, rows } =
       await SupportConversation.findAndCountAll({
         where,
-        order: [
-          ["updatedAt", "DESC"],
-          ["createdAt", "DESC"],
-        ],
+        order: [["updatedAt", "DESC"]],
         limit,
         offset,
       });
 
-    const conversationIds = conversations.map(
-      (conversation) => conversation.id
-    );
-
-    // Fetch messages for this page in one query instead of one query
-    // per conversation.
-    const recentMessages = conversationIds.length
-      ? await ConversationMessage.findAll({
-          where: {
-            schoolId,
-            conversationId: {
-              [Op.in]: conversationIds,
-            },
-          },
-          attributes: [
-            "id",
-            "conversationId",
-            "senderUserId",
-            "senderPlatformUserId",
-            "message",
-            "imageUrl",
-            "createdAt",
-          ],
-          order: [["createdAt", "DESC"], ["id", "DESC"]],
-        })
-      : [];
-
-    const latestMessageByConversation = new Map();
-
-    for (const item of recentMessages) {
-      if (!latestMessageByConversation.has(item.conversationId)) {
-        latestMessageByConversation.set(
-          item.conversationId,
-          item
-        );
-      }
-    }
-
-    const conversationsWithPreview = conversations.map(
-      (conversation) => ({
-        ...conversation.toJSON(),
-        lastMessage:
-          latestMessageByConversation.get(conversation.id) ?? null,
-      })
-    );
-
     return res.status(200).json({
       success: true,
+      message: "Your support conversations retrieved successfully.",
       data: {
-        conversations: conversationsWithPreview,
+        conversations: rows,
         pagination: {
           totalItems: count,
           currentPage: page,
@@ -326,37 +236,87 @@ export const getMyConversations = async (req, res, next) => {
 // 3. GET CONVERSATION MESSAGES
 // ==========================================
 
-export const getConversationMessages = async (req, res, next) => {
+export const getConversationMessages = async (
+  req,
+  res,
+  next
+) => {
   try {
-    requireSupportAccess(req);
+    const schoolId = getSchoolId(req, next);
 
-    const { userId, schoolId } = getSchoolUser(req);
+    if (!schoolId) return;
+
     const { conversationId } = req.params;
-    const { page, limit, offset } = getPagination(req.query, 50);
 
-    await findMyConversation({
+    const {
+      page: queryPage = 1,
+      limit: queryLimit = 50,
+    } = req.query;
+
+    const page = Number(queryPage);
+    const limit = Number(queryLimit);
+
+    // Verify conversation ownership.
+    const conversation = await findMyConversation(
       conversationId,
       schoolId,
-      userId,
+      req.user.id
+    );
+
+    if (!conversation) {
+      return next(
+        new AppError(
+          "Support conversation not found.",
+          404
+        )
+      );
+    }
+
+    const offset = (page - 1) * limit;
+
+    const {
+      count,
+      rows,
+    } = await ConversationMessage.findAndCountAll({
+      where: {
+        conversationId,
+        schoolId,
+      },
+
+      include: [
+        {
+          association: "senderUser",
+          attributes: [
+            "id",
+            "firstName",
+            "surName",
+            "role",
+          ],
+          required: false,
+        },
+        {
+          association: "senderPlatformUser",
+          attributes: ["id"],
+          required: false,
+        },
+      ],
+
+      // Retrieve the latest messages first,
+      // then reverse them for chronological display.
+      order: [["createdAt", "DESC"]],
+
+      limit,
+      offset,
+      distinct: true,
     });
 
-    const { count, rows: messages } =
-      await ConversationMessage.findAndCountAll({
-        where: {
-          conversationId,
-          schoolId,
-        },
-        order: [
-          ["createdAt", "ASC"],
-          ["id", "ASC"],
-        ],
-        limit,
-        offset,
-      });
+    const messages = rows.reverse();
 
     return res.status(200).json({
       success: true,
+      message: "Conversation messages retrieved successfully.",
       data: {
+        conversation,
         messages,
         pagination: {
           totalItems: count,
@@ -375,50 +335,76 @@ export const getConversationMessages = async (req, res, next) => {
 // 4. SEND MESSAGE
 // ==========================================
 
-export const sendMessage = async (req, res, next) => {
-  let transaction;
+export const sendMessage = async (
+  req,
+  res,
+  next
+) => {
+  const transaction = await dbConnection.transaction();
 
   try {
-    requireSupportAccess(req);
+    const schoolId = getSchoolId(req, next);
 
-    const { userId, schoolId } = getSchoolUser(req);
+    if (!schoolId) {
+      await transaction.rollback();
+      return;
+    }
+
     const { conversationId } = req.params;
-    const { message, imageUrl, imageKey } =
-      getMessageContent(req.body);
+    const { message } = req.body;
 
-    transaction = await dbConnection.transaction();
-
-    const conversation = await findMyConversation({
+    // Verify conversation ownership.
+    const conversation = await findMyConversation(
       conversationId,
       schoolId,
-      userId,
-      transaction,
-      lock: true,
-    });
+      req.user.id
+    );
 
-    if (CLOSED_STATUSES.includes(conversation.status)) {
-      throw new AppError(
-        "This conversation is no longer active. Reopen it before sending another message.",
-        409
+    if (!conversation) {
+      await transaction.rollback();
+
+      return next(
+        new AppError(
+          "Support conversation not found.",
+          404
+        )
+      );
+    }
+
+    // Resolved or closed conversations cannot receive
+    // messages until the school user reopens them.
+    if (
+      ["RESOLVED", "CLOSED"].includes(conversation.status)
+    ) {
+      await transaction.rollback();
+
+      return next(
+        new AppError(
+          "This conversation is no longer active. Reopen it before sending another message.",
+          400
+        )
       );
     }
 
     const newMessage = await ConversationMessage.create(
       {
-        conversationId: conversation.id,
+        conversationId,
         schoolId,
-        senderUserId: userId,
+        senderUserId: req.user.id,
         senderPlatformUserId: null,
         message,
-        imageUrl,
-        imageKey,
       },
       { transaction }
     );
 
-    // Keep the conversation inbox ordered by recent activity.
-    conversation.changed("updatedAt", true);
-    await conversation.save({ transaction });
+    // Update conversation activity so it appears
+    // at the top of the conversation list.
+    await conversation.update(
+      {
+        updatedAt: new Date(),
+      },
+      { transaction }
+    );
 
     await transaction.commit();
 
@@ -430,12 +416,7 @@ export const sendMessage = async (req, res, next) => {
       },
     });
   } catch (error) {
-    try {
-      await rollbackIfNeeded(transaction);
-    } catch (rollbackError) {
-      return next(rollbackError);
-    }
-
+    await transaction.rollback();
     return next(error);
   }
 };
@@ -444,37 +425,47 @@ export const sendMessage = async (req, res, next) => {
 // 5. REOPEN CONVERSATION
 // ==========================================
 
-export const reopenConversation = async (req, res, next) => {
-  let transaction;
-
+export const reopenConversation = async (
+  req,
+  res,
+  next
+) => {
   try {
-    requireSupportAccess(req);
+    const schoolId = getSchoolId(req, next);
 
-    const { userId, schoolId } = getSchoolUser(req);
+    if (!schoolId) return;
+
     const { conversationId } = req.params;
 
-    transaction = await dbConnection.transaction();
-
-    const conversation = await findMyConversation({
+    const conversation = await findMyConversation(
       conversationId,
       schoolId,
-      userId,
-      transaction,
-      lock: true,
-    });
+      req.user.id
+    );
 
+    if (!conversation) {
+      return next(
+        new AppError(
+          "Support conversation not found.",
+          404
+        )
+      );
+    }
+
+    // Only resolved conversations can be reopened.
     if (conversation.status !== "RESOLVED") {
-      throw new AppError(
-        "Only resolved conversations can be reopened.",
-        409
+      return next(
+        new AppError(
+          "Only resolved conversations can be reopened.",
+          400
+        )
       );
     }
 
     conversation.status = "OPEN";
     conversation.resolvedAt = null;
 
-    await conversation.save({ transaction });
-    await transaction.commit();
+    await conversation.save();
 
     return res.status(200).json({
       success: true,
@@ -484,12 +475,6 @@ export const reopenConversation = async (req, res, next) => {
       },
     });
   } catch (error) {
-    try {
-      await rollbackIfNeeded(transaction);
-    } catch (rollbackError) {
-      return next(rollbackError);
-    }
-
     return next(error);
   }
 };

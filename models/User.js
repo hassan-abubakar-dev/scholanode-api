@@ -93,15 +93,12 @@ role: {
       allowNull: true,
     },
 
-    profileImageUrl: {
+    profileImageKey: {
       type: DataTypes.STRING,
       allowNull: true,
     },
 
-    profileImagePublicId: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
+  
 
     // ===============================
     // SYSTEM INFORMATION

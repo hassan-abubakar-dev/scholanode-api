@@ -105,7 +105,7 @@ const SupportConversation = dbConnection.define(
     tableName: "SupportConversations",
     timestamps: true,
 
-    indexes: [
+    indexes: [ 
       {
         fields: ["schoolId", "status", "createdAt"],
       },

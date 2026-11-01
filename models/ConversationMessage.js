@@ -47,25 +47,11 @@ const ConversationMessage = dbConnection.define(
 
     message: {
       type: DataTypes.TEXT,
-      allowNull: true,
+      allowNull: false,
       validate: {
+        notEmpty: true,
         len: [1, 10000],
       },
-    },
-
-    // ===============================
-    // OPTIONAL IMAGE ATTACHMENT
-    // ===============================
-
-    imageUrl: {
-      type: DataTypes.STRING(2048),
-      allowNull: true,
-    },
-
-    // Cloudflare R2 object key.
-    imageKey: {
-      type: DataTypes.STRING(500),
-      allowNull: true,
     },
   },
   {
@@ -80,22 +66,6 @@ const ConversationMessage = dbConnection.define(
         if (hasSchoolUser === hasPlatformUser) {
           throw new Error(
             "A message must have exactly one sender: a school user or a platform user."
-          );
-        }
-      },
-
-      messageOrImageRequired() {
-        const hasMessage =
-          typeof this.message === "string" &&
-          this.message.trim().length > 0;
-
-        const hasImage =
-          typeof this.imageUrl === "string" &&
-          this.imageUrl.trim().length > 0;
-
-        if (!hasMessage && !hasImage) {
-          throw new Error(
-            "A message or image attachment is required."
           );
         }
       },

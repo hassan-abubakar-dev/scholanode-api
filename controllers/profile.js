@@ -9,7 +9,25 @@ import generateExpiryTime from "../utils/experyTime.js";
 import { User } from "../relationships/associations.js";
 import VerificationCode from "../models/VerificationCode.js";
 
+import path from "path";
+
+import {
+    uploadPrivateFile,
+    getPrivateFileUrl,
+    getPrivateFileMetadata,
+    deletePrivateFile,
+} from "../services/storage/r2.service.js";
+
+
 const EMAIL_CHANGE_PURPOSE = "PROFILE_EMAIL_CHANGE";
+
+const MAX_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
+
+const ALLOWED_PROFILE_IMAGE_TYPES = {
+    "image/jpeg": [".jpg", ".jpeg"],
+    "image/png": [".png"],
+    "image/webp": [".webp"],
+};
 
 const getAuthenticatedUser = async (req) => {
     const user = await User.findByPk(req.user.id);
@@ -23,6 +41,165 @@ const getAuthenticatedUser = async (req) => {
     }
 
     return user;
+};
+
+// ======================================================
+// REQUEST PROFILE IMAGE UPLOAD
+// POST /profile/image/upload-url
+// ======================================================
+
+export const requestProfileImageUpload = async (req, res, next) => {
+    try {
+        const user = await getAuthenticatedUser(req);
+
+        const { fileName, contentType, fileSize } = req.body;
+
+        const extension = path.extname(fileName).toLowerCase();
+
+        const allowedExtensions =
+            ALLOWED_PROFILE_IMAGE_TYPES[contentType];
+
+        if (
+            !allowedExtensions ||
+            !allowedExtensions.includes(extension)
+        ) {
+            throw new AppError(
+                "Only JPEG, PNG and WebP profile images are allowed.",
+                400
+            );
+        }
+
+        if (fileSize > MAX_PROFILE_IMAGE_SIZE) {
+            throw new AppError(
+                "Profile image must not exceed 5MB.",
+                400
+            );
+        }
+
+        const { uploadUrl, key } = await uploadPrivateFile({
+            folder: `profiles/users/${user.id}`,
+            originalName: fileName,
+            contentType,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile image upload URL generated successfully.",
+            uploadUrl,
+            key,
+            expiresIn: 300,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ======================================================
+// CONFIRM PROFILE IMAGE UPLOAD
+// PATCH /profile/image/confirm
+// ======================================================
+
+export const confirmProfileImageUpload = async (req, res, next) => {
+    try {
+        const user = await getAuthenticatedUser(req);
+
+        const { key } = req.body;
+
+        // Ensure the object belongs to this authenticated user.
+        const expectedPrefix = `profiles/users/${user.id}/`;
+
+        if (
+            !key.startsWith(expectedPrefix) ||
+            key.includes("..") ||
+            key.includes("\\")
+        ) {
+            throw new AppError(
+                "Invalid profile image reference.",
+                400
+            );
+        }
+
+        // Verify that the uploaded object actually exists.
+        let metadata;
+
+        try {
+            metadata = await getPrivateFileMetadata(key);
+        } catch (error) {
+            if (
+                error.name === "NotFound" ||
+                error.$metadata?.httpStatusCode === 404
+            ) {
+                throw new AppError(
+                    "Uploaded profile image was not found.",
+                    400
+                );
+            }
+
+            throw error;
+        }
+
+        // Verify the actual uploaded content type.
+        if (
+            !Object.keys(ALLOWED_PROFILE_IMAGE_TYPES).includes(
+                metadata.contentType
+            )
+        ) {
+            await deletePrivateFile(key).catch(() => {});
+
+            throw new AppError(
+                "Invalid profile image format.",
+                400
+            );
+        }
+
+        // Verify the actual uploaded file size.
+        if (
+            !metadata.contentLength ||
+            metadata.contentLength > MAX_PROFILE_IMAGE_SIZE
+        ) {
+            await deletePrivateFile(key).catch(() => {});
+
+            throw new AppError(
+                "Profile image must not exceed 5MB.",
+                400
+            );
+        }
+
+        const oldImageKey = user.profileImageKey;
+
+        // Save the new image reference first.
+        await user.update({
+            profileImageKey: key,
+        });
+
+        // Delete the previous image only after successful database update.
+        if (oldImageKey && oldImageKey !== key) {
+            try {
+                await deletePrivateFile(oldImageKey);
+            } catch (deleteError) {
+                // Keep the new profile image even if old-file cleanup fails.
+                console.error(
+                    "Failed to delete previous profile image:",
+                    deleteError
+                );
+            }
+        }
+
+        // Generate a fresh signed URL for immediate frontend display.
+        const profileImageUrl = await getPrivateFileUrl(key);
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile image updated successfully.",
+            user: {
+                id: user.id,
+                profileImageKey: user.profileImageKey,
+                profileImageUrl,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
 };
 
 // ======================================================
@@ -54,6 +231,10 @@ export const updateProfile = async (req, res, next) => {
 
         await user.save();
 
+        const profileImageUrl = user.profileImageKey
+            ? await getPrivateFileUrl(user.profileImageKey)
+            : null;
+
         return res.status(200).json({
             success: true,
             message: "Profile updated successfully.",
@@ -63,7 +244,8 @@ export const updateProfile = async (req, res, next) => {
                 surName: user.surName,
                 email: user.email,
                 phoneNumber: user.phoneNumber,
-                profileImageUrl: user.profileImageUrl,
+                profileImageKey: user.profileImageKey,
+                profileImageUrl,
                 role: user.role,
             },
         });

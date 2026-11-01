@@ -75,7 +75,7 @@ ownershipType: {
       allowNull: true,
     },
 
-    logoUrl: {
+    logoKey: {
       type: DataTypes.STRING,
       allowNull: true,
       validate: {
@@ -83,24 +83,12 @@ ownershipType: {
       },
     },
 
-    logoPublicId: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
 
     welcomeMessage: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
 
-
-    website: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-      validate: {
-        isUrl: true,
-      },
-    },
 
     // ===============================
     // SYSTEM FIELDS

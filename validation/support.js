@@ -1,4 +1,3 @@
-
 import Joi from "joi";
 
 // ==========================================
@@ -28,59 +27,24 @@ const conversationStatuses = [
 // ==========================================
 
 const conversationIdParamsSchema = Joi.object({
-  conversationId: Joi.string().guid({
-    version: ["uuidv4", "uuidv5"],
-  }).required(),
-}).unknown(false);
+  conversationId: Joi.string()
+    .guid({
+      version: ["uuidv4", "uuidv5"],
+    })
+    .required(),
+})
+  .unknown(false)
+  .required();
 
-const messageFields = {
+const messageSchema = Joi.object({
   message: Joi.string()
     .trim()
+    .min(1)
     .max(10000)
-    .allow("")
-    .optional(),
-
-  imageUrl: Joi.string()
-    .uri({ scheme: ["https", "http"] })
-    .max(2048)
-    .allow("")
-    .optional(),
-
-  imageKey: Joi.string()
-    .trim()
-    .max(500)
-    .allow("")
-    .optional(),
-};
-
-const requireMessageOrImage = (value, helpers) => {
-  const hasMessage =
-    typeof value.message === "string" &&
-    value.message.trim().length > 0;
-
-  const hasImage =
-    typeof value.imageUrl === "string" &&
-    value.imageUrl.trim().length > 0;
-
-  if (!hasMessage && !hasImage) {
-    return helpers.error("any.custom");
-  }
-
-  const hasImageUrl = Boolean(value.imageUrl?.trim());
-  const hasImageKey = Boolean(value.imageKey?.trim());
-
-  if (hasImageUrl !== hasImageKey) {
-    return helpers.error("any.customImage");
-  }
-
-  return value;
-};
-
-const contentMessages = {
-  "any.custom": "A message or image attachment is required.",
-  "any.customImage":
-    "A valid image attachment must include both imageUrl and imageKey.",
-};
+    .required(),
+})
+  .unknown(false)
+  .required();
 
 // ==========================================
 // CREATE CONVERSATION
@@ -91,14 +55,14 @@ export const createConversationSchema = Joi.object({
     .valid(...conversationCategories)
     .required(),
 
-  ...messageFields,
+  message: Joi.string()
+    .trim()
+    .min(1)
+    .max(10000)
+    .required(),
 })
-  .custom(requireMessageOrImage)
-  .messages({
-    ...contentMessages,
-    "any.required": "{{#label}} is required.",
-  })
-  .unknown(false);
+  .unknown(false)
+  .required();
 
 // ==========================================
 // GET MY CONVERSATIONS
@@ -123,7 +87,9 @@ export const getMyConversationsSchema = Joi.object({
   category: Joi.string()
     .valid(...conversationCategories)
     .optional(),
-}).unknown(false);
+})
+  .unknown(false)
+  .required();
 
 // ==========================================
 // GET CONVERSATION MESSAGES
@@ -143,7 +109,9 @@ export const getConversationMessagesQuerySchema = Joi.object({
     .min(1)
     .max(100)
     .default(50),
-}).unknown(false);
+})
+  .unknown(false)
+  .required();
 
 // ==========================================
 // SEND MESSAGE
@@ -152,12 +120,7 @@ export const getConversationMessagesQuerySchema = Joi.object({
 export const sendMessageParamsSchema =
   conversationIdParamsSchema;
 
-export const sendMessageBodySchema = Joi.object({
-  ...messageFields,
-})
-  .custom(requireMessageOrImage)
-  .messages(contentMessages)
-  .unknown(false);
+export const sendMessageBodySchema = messageSchema;
 
 // ==========================================
 // REOPEN CONVERSATION

@@ -1,5 +1,46 @@
 import Joi from "joi";
 
+
+// ======================================================
+// PROFILE IMAGE UPLOAD URL
+// ======================================================
+
+export const profileImageUploadUrlValidationSchema = Joi.object({
+    fileName: Joi.string()
+        .trim()
+        .min(1)
+        .max(255)
+        .pattern(/^[a-zA-Z0-9 _.-]+$/)
+        .required(),
+
+    contentType: Joi.string()
+        .valid("image/jpeg", "image/png", "image/webp")
+        .required(),
+
+    fileSize: Joi.number()
+        .integer()
+        .min(1)
+        .max(5 * 1024 * 1024)
+        .required(),
+})
+    .unknown(false);
+
+
+// ======================================================
+// CONFIRM PROFILE IMAGE UPLOAD
+// ======================================================
+
+export const confirmProfileImageUploadValidationSchema = Joi.object({
+    key: Joi.string()
+        .trim()
+        .pattern(
+            /^profiles\/users\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i
+        )
+        .required(),
+})
+    .unknown(false);
+
+    
 export const updateProfileValidationSchema = Joi.object({
     firstName: Joi.string()
         .trim()

@@ -18,6 +18,7 @@ import generateExpiryTime from '../utils/experyTime.js';
 
 import { User, School, Owner, Student, Class } from "../relationships/associations.js";
 import VerificationCode from '../models/VerificationCode.js';
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 
 dotenv.config();
@@ -92,7 +93,7 @@ export const loginUser = async (req, res, next) => {
     if (!isPasswordValid) {
       return next(
         new AppError(
-          "Invalid school code or login credentials. INVALID PASSWORD",
+          "Invalid school code or login credentials.",
           401
         )
       );
@@ -332,6 +333,9 @@ export const getLoggedInUser = async (req, res, next) => {
 
     // Retrieve school information.
     const school = await School.findByPk(user.schoolId);
+    const profileImageUrl = user.profileImageKey
+      ? await getPrivateFileUrl(user.profileImageKey)
+      : null;
 
     const userData = {
       id: user.id,
@@ -340,7 +344,8 @@ export const getLoggedInUser = async (req, res, next) => {
       surName: user.surName,
       email: user.email,
       phoneNumber: user.phoneNumber,
-      profileImageUrl: user.profileImageUrl,
+      profileImageKey: user.profileImageKey,
+      profileImageUrl,
       role: user.role,
       status: user.status,
       isOwner,
