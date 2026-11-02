@@ -41,6 +41,10 @@ export const createContactInquiry = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("CREATE_CONTACT_INQUIRY_ERROR:", {
       url: req.originalUrl,
       method: req.method,
@@ -136,6 +140,10 @@ export const getContactInquiries = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("GET_CONTACT_INQUIRIES_ERROR:", {
       url: req.originalUrl,
       method: req.method,
@@ -215,6 +223,10 @@ export const updateContactInquiryStatus = async (req, res, next) => {
       data: inquiry,
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("UPDATE_CONTACT_INQUIRY_STATUS_ERROR:", {
       url: req.originalUrl,
       method: req.method,
@@ -274,6 +286,10 @@ export const getContactInquiryStats = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("GET_CONTACT_INQUIRY_STATS_ERROR:", {
       url: req.originalUrl,
       method: req.method,

@@ -9,6 +9,10 @@ export const handleControllerError = (
   context,
   productionMessage = "Unable to process your request. Please try again."
 ) => {
+  if (error instanceof AppError) {
+    return next(error);
+  }
+
   console.error(`${context}:`, {
     url: req?.originalUrl,
     method: req?.method,

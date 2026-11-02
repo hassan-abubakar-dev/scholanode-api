@@ -56,6 +56,10 @@ export const createSchoolInquiry = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("CREATE_SCHOOL_INQUIRY_ERROR:", {
       url: req.originalUrl,
       method: req.method,
@@ -168,6 +172,10 @@ export const getSchoolInquiries = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("GET_SCHOOL_INQUIRIES_ERROR:", {
       url: req.originalUrl,
       method: req.method,
@@ -228,6 +236,10 @@ export const updateSchoolInquiryStatus = async (req, res, next) => {
       data: inquiry,
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("UPDATE_SCHOOL_INQUIRY_STATUS_ERROR:", {
       url: req.originalUrl,
       method: req.method,

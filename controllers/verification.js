@@ -181,6 +181,10 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
             await transaction.rollback();
         }
 
+        if (error instanceof AppError) {
+            return next(error);
+        }
+
         console.error("VERIFY_NEW_SCHOOL_ACCOUNT_ERROR:", {
             url: req.originalUrl,
             method: req.method,
@@ -320,6 +324,10 @@ export const verifyRecoveryCode = async (req, res, next) => {
     } catch (error) {
         if (transaction && !transaction.finished) {
             await transaction.rollback();
+        }
+
+        if (error instanceof AppError) {
+            return next(error);
         }
 
         console.error("VERIFY_RECOVERY_CODE_ERROR:", {

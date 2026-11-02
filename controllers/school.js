@@ -847,6 +847,10 @@ export const updateSchoolSetup = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     const errorContext = {
       url: req.originalUrl,
       method: req.method,
@@ -1038,6 +1042,10 @@ export const createAcademicSetup = async (req, res, next) => {
   } catch (err) {
     await rollbackTransaction(transaction, "CREATE_SCHOOL_ONBOARDING_ROLLBACK_ERROR");
 
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     if (err.name === "SequelizeUniqueConstraintError") {
       return next(
         new AppError(
@@ -1208,6 +1216,10 @@ export const createClassSetup = async (req, res, next) => {
   } catch (err) {
     await rollbackTransaction(transaction, "CREATE_CLASS_SETUP_ROLLBACK_ERROR");
 
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     if (err.name === "SequelizeUniqueConstraintError") {
       return next(
         new AppError(
@@ -1330,6 +1342,10 @@ export const createSubjectSetup = async (req, res, next) => {
     });
   } catch (err) {
     await rollbackTransaction(transaction, "CREATE_SUBJECT_SETUP_ROLLBACK_ERROR");
+
+    if (err instanceof AppError) {
+      return next(err);
+    }
 
     if (err.name === "SequelizeUniqueConstraintError") {
       return next(

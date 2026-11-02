@@ -241,6 +241,10 @@ export const requestNewAccessToken = async (req, res, next) => {
       }
     );
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     const errorContext = {
       url: req.originalUrl,
       method: req.method,
@@ -1054,6 +1058,10 @@ export const logOutUser = async (req, res, next) => {
       message: "Logged out successfully.",
     });
   } catch (err) {
+    if (err instanceof AppError) {
+      return next(err);
+    }
+
     console.error("LOGOUT_USER_ERROR:", {
       url: req.originalUrl,
       method: req.method,
