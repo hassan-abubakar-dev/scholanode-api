@@ -968,6 +968,14 @@ export const confirmSchoolLogoUpload = async (req, res, next) => {
       throw new AppError("Invalid school logo reference.", 400);
     }
 
+    const school = await School.findByPk(schoolId);
+
+    if (!school) {
+      await deletePublicFile(key).catch(() => {});
+
+      return next(new AppError("School not found.", 404));
+    }
+
     // Verify that the uploaded object actually exists.
     let metadata;
 
@@ -1001,12 +1009,6 @@ export const confirmSchoolLogoUpload = async (req, res, next) => {
       await deletePublicFile(key).catch(() => {});
 
       throw new AppError("School logo must not exceed 5MB.", 400);
-    }
-
-    const school = await School.findByPk(schoolId);
-
-    if (!school) {
-      return next(new AppError("School not found.", 404));
     }
 
     const oldLogoKey = school.logoKey;
