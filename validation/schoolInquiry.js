@@ -2,10 +2,15 @@ import Joi from "joi";
 
 // Create a public school inquiry
 export const createSchoolInquirySchema = Joi.object({
-  schoolId: Joi.string().uuid().required().messages({
-    "string.empty": "School ID is required.",
+  schoolId: Joi.string().uuid().messages({
+    "string.empty": "School ID cannot be empty.",
     "string.guid": "School ID must be a valid UUID.",
-    "any.required": "School ID is required.",
+  }),
+
+  schoolCode: Joi.string().trim().uppercase().min(2).max(20).messages({
+    "string.empty": "School code cannot be empty.",
+    "string.min": "School code must be at least 2 characters.",
+    "string.max": "School code cannot exceed 20 characters.",
   }),
 
   fullName: Joi.string().trim().min(2).max(100).required().messages({
@@ -48,7 +53,13 @@ export const createSchoolInquirySchema = Joi.object({
     "string.min": "Message must be at least 10 characters.",
     "string.max": "Message cannot exceed 2000 characters.",
   }),
-}).required();
+})
+  .xor("schoolId", "schoolCode")
+  .messages({
+    "object.missing": "A school ID or school code is required.",
+    "object.xor": "Provide either the school ID or the school code, not both.",
+  })
+  .required();
 
 
 // Get school inquiries: pagination, search, filtering, and sorting

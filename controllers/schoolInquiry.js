@@ -9,12 +9,18 @@ const isDev = process.env.NODE_ENV !== "production";
 // 1. Submit a public inquiry to a school
 export const createSchoolInquiry = async (req, res, next) => {
   try {
-    const { schoolId, fullName, contact, subject, message } = req.body;
+    const { schoolId, schoolCode, fullName, contact, subject, message } =
+      req.body;
 
-    // Confirm that the school exists
-    const school = await School.findByPk(schoolId, {
-      attributes: ["id", "status"],
-    });
+    // Public visitors only know the school code, while internal callers use the id
+    const school = schoolId
+      ? await School.findByPk(schoolId, {
+          attributes: ["id", "status"],
+        })
+      : await School.findOne({
+          where: { schoolCode: schoolCode.trim().toUpperCase() },
+          attributes: ["id", "status"],
+        });
 
     if (!school) {
       return next(new AppError("School not found.", 404));
@@ -31,7 +37,7 @@ export const createSchoolInquiry = async (req, res, next) => {
     }
 
     const inquiry = await SchoolInquiry.create({
-      schoolId,
+      schoolId: school.id,
       fullName: fullName.trim(),
       contact: contact.trim(),
       subject: subject.trim(),
