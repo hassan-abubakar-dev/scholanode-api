@@ -2,6 +2,7 @@ import { School, SchoolInquiry } from "../relationships/associations.js";
 import { Op } from "sequelize";
 
 import AppError from "../utils/AppError.js";
+import { likeCondition } from "../utils/dbHelper.js";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -118,10 +119,10 @@ export const getSchoolInquiries = async (req, res, next) => {
     // Optional search across inquiry details
     if (search) {
       where[Op.or] = [
-        { fullName: { [Op.iLike]: `%${search}%` } },
-        { contact: { [Op.iLike]: `%${search}%` } },
-        { subject: { [Op.iLike]: `%${search}%` } },
-        { message: { [Op.iLike]: `%${search}%` } },
+        { fullName: likeCondition(`%${search}%`) },
+        { contact: likeCondition(`%${search}%`) },
+        { subject: likeCondition(`%${search}%`) },
+        { message: likeCondition(`%${search}%`) },
       ];
     }
 

@@ -3,6 +3,7 @@ import { Announcement, Notification } from "../relationships/associations.js";
 import { Op } from "sequelize";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
+import { likeCondition } from "../utils/dbHelper.js";
 
 const allowedManagementRoles = [
     "LEADER",
@@ -37,8 +38,8 @@ const getAnnouncementFilters = (query) => {
 
     if (query.search?.trim()) {
         where[Op.or] = [
-            { title: { [Op.iLike]: `%${query.search.trim()}%` } },
-            { message: { [Op.iLike]: `%${query.search.trim()}%` } },
+            { title: likeCondition(`%${query.search.trim()}%`) },
+            { message: likeCondition(`%${query.search.trim()}%`) },
         ];
     }
 

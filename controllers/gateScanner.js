@@ -5,6 +5,7 @@ import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 
 import { dbConnection } from "../config/db.js";
+import { likeCondition } from "../utils/dbHelper.js";
 
 
 // Staff roles that may scan when explicitly authorized.
@@ -936,17 +937,17 @@ export const getScanHistory = async (req, res, next) => {
       where[Op.or] = [
         {
           "$student.admissionNumber$": {
-            [Op.iLike]: `%${trimmedSearch}%`,
+            ...likeCondition(`%${trimmedSearch}%`),
           },
         },
         {
           "$student.user.firstName$": {
-            [Op.iLike]: `%${trimmedSearch}%`,
+            ...likeCondition(`%${trimmedSearch}%`),
           },
         },
         {
           "$student.user.surName$": {
-            [Op.iLike]: `%${trimmedSearch}%`,
+            ...likeCondition(`%${trimmedSearch}%`),
           },
         },
       ];

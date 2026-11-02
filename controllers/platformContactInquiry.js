@@ -1,6 +1,7 @@
 import { PlatformContactInquiry, PlatformUser } from "../relationships/associations.js";
 import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
+import { likeCondition } from "../utils/dbHelper.js";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -95,10 +96,10 @@ export const getContactInquiries = async (req, res, next) => {
     // Search across visitor and inquiry details
     if (search) {
       where[Op.or] = [
-        { fullName: { [Op.iLike]: `%${search}%` } },
-        { email: { [Op.iLike]: `%${search}%` } },
-        { subject: { [Op.iLike]: `%${search}%` } },
-        { message: { [Op.iLike]: `%${search}%` } },
+        { fullName: likeCondition(`%${search}%`) },
+        { email: likeCondition(`%${search}%`) },
+        { subject: likeCondition(`%${search}%`) },
+        { message: likeCondition(`%${search}%`) },
       ];
     }
 

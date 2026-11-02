@@ -5,6 +5,7 @@ import AppError from '../utils/AppError.js';
 import sendEmail from '../config/emailService.js';
 import generateVerificationCode from "../utils/verificationCode.js";
 import generateExpiryTime from "../utils/experyTime.js";
+import { likeCondition } from "../utils/dbHelper.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -791,24 +792,24 @@ export const getAllParents = async (req, res, next) => {
       const pattern = `%${searchTerm}%`;
 
       parentWhere[Op.or] = [
-        { "$user.firstName$": { [Op.iLike]: pattern } },
-        { "$user.surName$": { [Op.iLike]: pattern } },
-        { "$user.phoneNumber$": { [Op.iLike]: pattern } },
-        { "$user.email$": { [Op.iLike]: pattern } },
-        { "$user.loginId$": { [Op.iLike]: pattern } },
+        { "$user.firstName$": likeCondition(pattern) },
+        { "$user.surName$": likeCondition(pattern) },
+        { "$user.phoneNumber$": likeCondition(pattern) },
+        { "$user.email$": likeCondition(pattern) },
+        { "$user.loginId$": likeCondition(pattern) },
         {
           "$studentRelationships.student.admissionNumber$": {
-            [Op.iLike]: pattern,
+            ...likeCondition(pattern),
           },
         },
         {
           "$studentRelationships.student.user.firstName$": {
-            [Op.iLike]: pattern,
+            ...likeCondition(pattern),
           },
         },
         {
           "$studentRelationships.student.user.surName$": {
-            [Op.iLike]: pattern,
+            ...likeCondition(pattern),
           },
         },
       ];

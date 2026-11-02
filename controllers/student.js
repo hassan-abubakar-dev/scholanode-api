@@ -3,6 +3,7 @@ import { Student, User, Class, ParentStudent } from "../relationships/associatio
 import bcrypt from "bcryptjs";
 import { dbConnection } from "../config/db.js";
 import { Op, fn, col, where as sequelizeWhere } from "sequelize";
+import { likeCondition } from "../utils/dbHelper.js";
 
 export const createStudent = async (req, res, next) => {
   let transaction;
@@ -196,17 +197,17 @@ export const getAllStudents = async (req, res, next) => {
       where[Op.or] = [
         {
           admissionNumber: {
-            [Op.iLike]: searchTerm,
+            ...likeCondition(searchTerm),
           },
         },
         {
           "$user.firstName$": {
-            [Op.iLike]: searchTerm,
+            ...likeCondition(searchTerm),
           },
         },
         {
           "$user.surName$": {
-            [Op.iLike]: searchTerm,
+            ...likeCondition(searchTerm),
           },
         },
         sequelizeWhere(
@@ -217,7 +218,7 @@ export const getAllStudents = async (req, res, next) => {
             col("user.surName")
           ),
           {
-            [Op.iLike]: searchTerm,
+            ...likeCondition(searchTerm),
           }
         ),
         sequelizeWhere(
@@ -228,7 +229,7 @@ export const getAllStudents = async (req, res, next) => {
             col("user.firstName")
           ),
           {
-            [Op.iLike]: searchTerm,
+            ...likeCondition(searchTerm),
           }
         ),
       ];
