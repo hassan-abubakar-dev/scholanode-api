@@ -54,6 +54,7 @@ router.post(
 router.get(
   "/progress",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   getAcademicSetupProgress
 );
 

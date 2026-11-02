@@ -35,9 +35,6 @@ const complaintSubmitters = [
   "STUDENT",
   "PARENT",
   "STAFF",
-  "LEADER",
-  "VICE_LEADER",
-  "ADMINISTRATOR",
   "EXAM_OFFICER",
 ];
 

@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { User } from "../relationships/associations.js";
+import { Owner, User } from "../relationships/associations.js";
 import { Op } from "sequelize";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -40,16 +40,51 @@ const STAFF_ROLES = [
   "STAFF",
 ];
 
+const ADMINISTRATIVE_ROLES = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+];
+
+const requireStaffManagementAccess = async (
+  req,
+  { administrativeOnly = false } = {}
+) => {
+  const schoolId = req.user?.schoolId;
+  const userId = req.user?.id;
+
+  if (!schoolId || !userId) {
+    throw new AppError("Authenticated school or user not found.", 401);
+  }
+
+  if (ADMINISTRATIVE_ROLES.includes(req.user.role)) {
+    return schoolId;
+  }
+
+  if (!administrativeOnly) {
+    const owner = await Owner.findOne({
+      where: {
+        schoolId,
+        userId,
+      },
+    });
+
+    if (owner) {
+      return schoolId;
+    }
+  }
+
+  throw new AppError(
+    administrativeOnly
+      ? "Only school administrators can activate or deactivate staff accounts."
+      : "You are not authorized to manage staff accounts.",
+    403
+  );
+};
+
 export const getAllStaff = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated school not found.",
-      });
-    }
+    const schoolId = await requireStaffManagementAccess(req);
 
     const staff = await User.findAll({
       where: {
@@ -103,15 +138,10 @@ export const getAllStaff = async (req, res, next) => {
 
 export const deactivateStaff = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
+    const schoolId = await requireStaffManagementAccess(req, {
+      administrativeOnly: true,
+    });
     const { staffId } = req.params;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated school not found.",
-      });
-    }
 
     const staff = await User.findOne({
       where: {
@@ -167,15 +197,10 @@ export const deactivateStaff = async (req, res, next) => {
 
 export const activateStaff = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
+    const schoolId = await requireStaffManagementAccess(req, {
+      administrativeOnly: true,
+    });
     const { staffId } = req.params;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated school not found.",
-      });
-    }
 
     const staff = await User.findOne({
       where: {
@@ -231,14 +256,7 @@ export const activateStaff = async (req, res, next) => {
 
 export const getLeaderStatus = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated school not found.",
-      });
-    }
+    const schoolId = await requireStaffManagementAccess(req);
 
     const leader = await User.findOne({
       where: {
@@ -260,15 +278,8 @@ export const getLeaderStatus = async (req, res, next) => {
 
 export const updateStaff = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
+    const schoolId = await requireStaffManagementAccess(req);
     const { staffId } = req.params;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated school not found.",
-      });
-    }
 
     const staff = await User.findOne({
       where: {
@@ -342,31 +353,8 @@ export const resetStaffPassword = async (req, res, next) => {
   let transaction;
 
   try {
-    const schoolId = req.user?.schoolId;
     const { staffId } = req.params;
-    const requesterRole = req.user?.role;
-
-    // 1. Verify authenticated school
-    if (!schoolId) {
-      return res.status(401).json({
-        status: "error",
-        message: "Authenticated school not found.",
-      });
-    }
-
-    // 2. Authorize the requester
-    const allowedRoles = [
-      "LEADER",
-      "VICE_LEADER",
-      "ADMINISTRATOR",
-    ];
-
-    if (!allowedRoles.includes(requesterRole)) {
-      return res.status(403).json({
-        status: "error",
-        message: "You are not authorized to reset staff passwords.",
-      });
-    }
+    const schoolId = await requireStaffManagementAccess(req);
 
     // 3. Find staff within the authenticated school
     const staff = await User.findOne({
@@ -569,14 +557,7 @@ export const inviteStaff = async (req, res, next) => {
 
   try {
     // 1. Get the authenticated school
-    const schoolId = req.user?.schoolId;
-
-    if (!schoolId) {
-      return res.status(401).json({
-        success: false,
-        message: "School authentication is required.",
-      });
-    }
+    const schoolId = await requireStaffManagementAccess(req);
 
     // 2. Input has already been validated by Joi middleware
     const email = req.body.email;
@@ -749,16 +730,7 @@ export const inviteStaff = async (req, res, next) => {
 
 export const importStaffCsv = async (req, res, next) => {
   try {
-    const schoolId = req.user?.schoolId;
-
-    if (!schoolId) {
-      return next(
-        new AppError(
-          "School information is missing from your session.",
-          400
-        )
-      );
-    }
+    const schoolId = await requireStaffManagementAccess(req);
 
     // The request has already passed importStaffCsvSchema.
     const staff = req.body.staff;
@@ -960,4 +932,3 @@ export const importStaffCsv = async (req, res, next) => {
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
-
