@@ -100,11 +100,46 @@ export const schoolCodeParamSchema = Joi.object({
 }).required();
 
 export const updateSchoolSetupSchema = Joi.object({
-  logoKey: Joi.string().trim().max(500).allow(null, "").optional(),
   welcomeMessage: Joi.string().trim().max(2000).allow(null, "").optional(),
   supportEmail: Joi.string().trim().email().max(100).allow(null, "").optional(),
   supportPhone: Joi.string().trim().max(20).allow(null, "").optional(),
-}).or("logoKey", "welcomeMessage", "supportEmail", "supportPhone").required();
+}).or("welcomeMessage", "supportEmail", "supportPhone").required();
+
+// ======================================================
+// SCHOOL LOGO UPLOAD URL
+// ======================================================
+
+export const schoolLogoUploadUrlValidationSchema = Joi.object({
+  fileName: Joi.string()
+    .trim()
+    .min(1)
+    .max(255)
+    .pattern(/^[a-zA-Z0-9 _.-]+$/)
+    .required(),
+
+  contentType: Joi.string()
+    .valid("image/jpeg", "image/png", "image/webp")
+    .required(),
+
+  fileSize: Joi.number()
+    .integer()
+    .min(1)
+    .max(5 * 1024 * 1024)
+    .required(),
+}).unknown(false);
+
+// ======================================================
+// CONFIRM SCHOOL LOGO UPLOAD
+// ======================================================
+
+export const confirmSchoolLogoUploadValidationSchema = Joi.object({
+  key: Joi.string()
+    .trim()
+    .pattern(
+      /^schools\/[0-9a-f-]{36}\/logo\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i
+    )
+    .required(),
+}).unknown(false);
 
 export const academicSetupValidationSchema = Joi.object({
   session: Joi.object({

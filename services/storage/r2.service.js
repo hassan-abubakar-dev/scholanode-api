@@ -138,6 +138,20 @@ export const publicFileExists = async (key) => {
   });
 };
 
+export const getPublicFileMetadata = async (key) => {
+  const command = new HeadObjectCommand({
+    Bucket: r2Config.public.bucket,
+    Key: key,
+  });
+
+  const result = await publicR2Client.send(command);
+
+  return {
+    contentType: result.ContentType,
+    contentLength: result.ContentLength,
+  };
+};
+
 /* =========================================
    PRIVATE BUCKET OPERATIONS
 ========================================= */

@@ -13,13 +13,27 @@ import { Op, col, fn, where as sequelizeWhere } from 'sequelize';
 import { dbConnection } from "../config/db.js";
 
 import pricingConfig from '../config/pricing.js';
-import { getPublicFileUrl } from "../services/storage/r2.service.js";
+import path from 'path';
+import {
+  uploadPublicFile,
+  getPublicFileUrl,
+  getPublicFileMetadata,
+  deletePublicFile,
+} from "../services/storage/r2.service.js";
 import generateStaffLoginId from '../services/generateStaffLoginId.js';
 import AppError from '../utils/AppError.js';
 import generateExpiryTime from '../utils/experyTime.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 
 const isDev = process.env.NODE_ENV === "development";
+
+const MAX_SCHOOL_LOGO_SIZE = 5 * 1024 * 1024;
+
+const ALLOWED_SCHOOL_LOGO_TYPES = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+};
 
 const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (character) => ({
@@ -807,14 +821,12 @@ export const updateSchoolSetup = async (req, res, next) => {
     }
 
     const {
-      logoKey,
       welcomeMessage,
       supportEmail,
       supportPhone,
     } = req.body;
 
     const updates = {
-      logoKey,
       welcomeMessage,
       supportEmail,
       supportPhone,
@@ -874,6 +886,159 @@ export const updateSchoolSetup = async (req, res, next) => {
         500
       )
     );
+  }
+};
+
+// ======================================================
+// REQUEST SCHOOL LOGO UPLOAD
+// POST /schools/my-school/logo/upload-url
+// ======================================================
+
+export const requestSchoolLogoUpload = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+
+    if (!schoolId) {
+      return next(new AppError("Authenticated school not found.", 401));
+    }
+
+    const { fileName, contentType, fileSize } = req.body;
+    const extension = path.extname(fileName).toLowerCase();
+    const allowedExtensions = ALLOWED_SCHOOL_LOGO_TYPES[contentType];
+
+    if (!allowedExtensions || !allowedExtensions.includes(extension)) {
+      throw new AppError(
+        "Only JPEG, PNG and WebP school logos are allowed.",
+        400
+      );
+    }
+
+    if (fileSize > MAX_SCHOOL_LOGO_SIZE) {
+      throw new AppError("School logo must not exceed 5MB.", 400);
+    }
+
+    const school = await School.findByPk(schoolId);
+
+    if (!school) {
+      return next(new AppError("School not found.", 404));
+    }
+
+    const { uploadUrl, key, publicUrl } = await uploadPublicFile({
+      folder: `schools/${schoolId}/logo`,
+      originalName: fileName,
+      contentType,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "School logo upload URL generated successfully.",
+      uploadUrl,
+      key,
+      publicUrl,
+      expiresIn: 300,
+    });
+  } catch (error) {
+    return handleControllerError(error, next, req, "SCHOOL_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+// ======================================================
+// CONFIRM SCHOOL LOGO UPLOAD
+// PATCH /schools/my-school/logo
+// ======================================================
+
+export const confirmSchoolLogoUpload = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+
+    if (!schoolId) {
+      return next(new AppError("Authenticated school not found.", 401));
+    }
+
+    const { key } = req.body;
+
+    // Ensure the object belongs to this authenticated school.
+    const expectedPrefix = `schools/${schoolId}/logo/`;
+
+    if (
+      !key.startsWith(expectedPrefix) ||
+      key.includes("..") ||
+      key.includes("\\")
+    ) {
+      throw new AppError("Invalid school logo reference.", 400);
+    }
+
+    // Verify that the uploaded object actually exists.
+    let metadata;
+
+    try {
+      metadata = await getPublicFileMetadata(key);
+    } catch (error) {
+      if (
+        error.name === "NotFound" ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        throw new AppError("Uploaded school logo was not found.", 400);
+      }
+
+      throw error;
+    }
+
+    // Verify the actual uploaded content type.
+    if (
+      !Object.keys(ALLOWED_SCHOOL_LOGO_TYPES).includes(metadata.contentType)
+    ) {
+      await deletePublicFile(key).catch(() => {});
+
+      throw new AppError("Invalid school logo format.", 400);
+    }
+
+    // Verify the actual uploaded file size.
+    if (
+      !metadata.contentLength ||
+      metadata.contentLength > MAX_SCHOOL_LOGO_SIZE
+    ) {
+      await deletePublicFile(key).catch(() => {});
+
+      throw new AppError("School logo must not exceed 5MB.", 400);
+    }
+
+    const school = await School.findByPk(schoolId);
+
+    if (!school) {
+      return next(new AppError("School not found.", 404));
+    }
+
+    const oldLogoKey = school.logoKey;
+
+    // Save the new logo reference first.
+    await school.update({
+      logoKey: key,
+    });
+
+    // Delete the previous logo only after successful database update.
+    if (oldLogoKey && oldLogoKey !== key) {
+      try {
+        await deletePublicFile(oldLogoKey);
+      } catch (deleteError) {
+        // Keep the new logo even if old-file cleanup fails.
+        console.error(
+          "Failed to delete previous school logo:",
+          deleteError
+        );
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "School logo updated successfully.",
+      school: {
+        id: school.id,
+        logoUrl: getPublicFileUrl(key),
+      },
+    });
+  } catch (error) {
+    return handleControllerError(error, next, req, "SCHOOL_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 

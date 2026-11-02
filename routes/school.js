@@ -7,6 +7,8 @@ import {
   getSchoolByCode,
   getMySchool,
   updateSchoolSetup,
+  requestSchoolLogoUpload,
+  confirmSchoolLogoUpload,
   createAcademicSetup,  
   createClassSetup,
   createSubjectSetup
@@ -19,6 +21,8 @@ import {
   schoolCodeQuerySchema,
   schoolCodeParamSchema,
   updateSchoolSetupSchema,
+  schoolLogoUploadUrlValidationSchema,
+  confirmSchoolLogoUploadValidationSchema,
   academicSetupValidationSchema,
   classSetupValidationSchema,
   subjectSetupValidationSchema,
@@ -72,6 +76,24 @@ router.patch(
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(updateSchoolSetupSchema, "body"),
   updateSchoolSetup
+);
+
+// Request a signed upload URL for a new school logo
+router.post(
+  "/my-school/logo/upload-url",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  validate(schoolLogoUploadUrlValidationSchema, "body"),
+  requestSchoolLogoUpload
+);
+
+// Confirm the uploaded school logo
+router.patch(
+  "/my-school/logo",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  validate(confirmSchoolLogoUploadValidationSchema, "body"),
+  confirmSchoolLogoUpload
 );
 
 // Create academic setup for a school
