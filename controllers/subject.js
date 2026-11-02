@@ -1,6 +1,7 @@
 import { handleControllerError } from "../utils/controllerError.js";
 import { Subject } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
+import { Op, col, fn, where as sequelizeWhere } from "sequelize";
 
 export const getAllSubjects = async (req, res, next) => {
   try {
@@ -80,7 +81,12 @@ export const updateSubject = async (req, res, next) => {
     const existingSubject = await Subject.findOne({
       where: {
         schoolId,
-        subjectName,
+        [Op.and]: [
+          sequelizeWhere(
+            fn("LOWER", col("subjectName")),
+            subjectName.trim().toLowerCase()
+          ),
+        ],
       },
     });
 

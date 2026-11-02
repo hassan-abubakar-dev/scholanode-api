@@ -18,7 +18,6 @@ import {
   registerSchoolValidationSchema,
   schoolCodeQuerySchema,
   schoolCodeParamSchema,
-  schoolIdParamSchema,
   updateSchoolSetupSchema,
   academicSetupValidationSchema,
   classSetupValidationSchema,
@@ -67,40 +66,36 @@ router.get(
 
 // Update school setup (optional fields)
 router.patch(
-  "/:id/setup",
+  "/my-school/setup",
   protectRoutes,
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
-  validate(schoolIdParamSchema, "params"),
   validate(updateSchoolSetupSchema, "body"),
   updateSchoolSetup
 );
 
 // Create academic setup for a school
 router.post(
-  "/:id/academic-setup",
+  "/my-school/academic-setup",
   protectRoutes,
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
-  validate(schoolIdParamSchema, "params"),
   validate(academicSetupValidationSchema, "body"),
   createAcademicSetup
 );
 
 // Create class setup for a school
 router.post(
-  "/:id/class-setup",
+  "/my-school/class-setup",
   protectRoutes,
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
-  validate(schoolIdParamSchema, "params"),
   validate(classSetupValidationSchema, "body"),
   createClassSetup
 );
 
 // Create subject setup for a school
 router.post(
-  "/:id/subject-setup",
+  "/my-school/subject-setup",
   protectRoutes,
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
-  validate(schoolIdParamSchema, "params"),
   validate(subjectSetupValidationSchema, "body"),
   createSubjectSetup
 );

@@ -340,6 +340,15 @@ export const createSubject = async (req, res, next) => {
     // 5. Start transaction
     transaction = await dbConnection.transaction();
 
+    const school = await School.findByPk(schoolId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!school) {
+      throw new AppError("Authenticated school not found.", 404);
+    }
+
     // 6. Check existing subjects belonging to this school
     const existingSubjects = await Subject.findAll({
       where: { schoolId },

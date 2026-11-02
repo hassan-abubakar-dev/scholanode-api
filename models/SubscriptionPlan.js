@@ -1,8 +1,5 @@
 import { DataTypes } from "sequelize";
-import dotenv from "dotenv";
 import { dbConnection } from "../config/db.js";
-
-dotenv.config();
 
 const SubscriptionPlan = dbConnection.define(
   "SubscriptionPlan",

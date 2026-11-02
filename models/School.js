@@ -1,8 +1,5 @@
 import { DataTypes } from "sequelize";
-import dotenv from "dotenv";
 import { dbConnection } from "../config/db.js";
-
-dotenv.config();
 
 const School = dbConnection.define(
   "School",
@@ -78,9 +75,6 @@ ownershipType: {
     logoKey: {
       type: DataTypes.STRING,
       allowNull: true,
-      validate: {
-        isUrl: true,
-      },
     },
 
 

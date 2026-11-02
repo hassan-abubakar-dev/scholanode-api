@@ -64,10 +64,23 @@ export const registerSchoolValidationSchema = Joi.object({
       "any.only": "Plan must be FREE, STARTER, STANDARD, or PROFESSIONAL.",
     }),
 
-    tierId: Joi.alternatives().try(Joi.string().trim(), Joi.number().integer()).allow(null, "").optional(),
+    tierId: Joi.when("plan", {
+      is: "FREE",
+      then: Joi.forbidden(),
+      otherwise: Joi.string().trim().required(),
+    }),
 
-    billingCycle: Joi.string().trim().uppercase().valid("MONTHLY", "TERMLY", "YEARLY").allow(null, "").optional().messages({
-      "any.only": "Billing cycle must be MONTHLY, TERMLY, or YEARLY.",
+    billingCycle: Joi.when("plan", {
+      is: "FREE",
+      then: Joi.forbidden(),
+      otherwise: Joi.string()
+        .trim()
+        .uppercase()
+        .valid("MONTHLY", "TERMLY", "YEARLY")
+        .required()
+        .messages({
+          "any.only": "Billing cycle must be MONTHLY, TERMLY, or YEARLY.",
+        }),
     }),
   }).required(),
 }).required();
@@ -86,46 +99,42 @@ export const schoolCodeParamSchema = Joi.object({
   }),
 }).required();
 
-export const schoolIdParamSchema = Joi.object({
-  id: Joi.string().uuid().required().messages({
-    "string.guid": "School id must be a valid UUID.",
-    "any.required": "School id is required.",
-  }),
-}).required();
-
 export const updateSchoolSetupSchema = Joi.object({
-  logoUrl: Joi.string().trim().uri().allow(null, "").optional(),
-  logoPublicId: Joi.string().trim().allow(null, "").optional(),
+  logoKey: Joi.string().trim().max(500).allow(null, "").optional(),
   welcomeMessage: Joi.string().trim().max(2000).allow(null, "").optional(),
-  loginInstructions: Joi.string().trim().max(2000).allow(null, "").optional(),
-  registrationGuidelines: Joi.string().trim().max(2000).allow(null, "").optional(),
-  supportEmail: Joi.string().trim().email().allow(null, "").optional(),
+  supportEmail: Joi.string().trim().email().max(100).allow(null, "").optional(),
   supportPhone: Joi.string().trim().max(20).allow(null, "").optional(),
-  website: Joi.string().trim().uri().allow(null, "").optional(),
-}).or("logoUrl", "logoPublicId", "welcomeMessage", "loginInstructions", "registrationGuidelines", "supportEmail", "supportPhone", "website").required();
+}).or("logoKey", "welcomeMessage", "supportEmail", "supportPhone").required();
 
 export const academicSetupValidationSchema = Joi.object({
   session: Joi.object({
-    sessionName: Joi.string().trim().min(2).max(100).required(),
+    sessionName: Joi.string().trim().min(4).max(20).required(),
     startDate: Joi.date().required(),
     endDate: Joi.date().greater(Joi.ref("startDate")).required(),
   }).required(),
 
-  terms: Joi.array().items(
-    Joi.object({
-      termName: Joi.string().trim().min(2).max(100).required(),
-      startDate: Joi.date().required(),
-      endDate: Joi.date().greater(Joi.ref("startDate")).required(),
-    })
-  ).min(1).required(),
+  terms: Joi.array()
+    .items(
+      Joi.object({
+        termName: Joi.string()
+          .trim()
+          .uppercase()
+          .valid("FIRST_TERM", "SECOND_TERM", "THIRD_TERM")
+          .required(),
+        startDate: Joi.date().required(),
+        endDate: Joi.date().greater(Joi.ref("startDate")).required(),
+      })
+    )
+    .length(3)
+    .unique("termName")
+    .required(),
 }).required();
 
 export const classSetupValidationSchema = Joi.object({
   classes: Joi.array().items(
     Joi.object({
-      classCategory: Joi.string().trim().uppercase().valid("PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY").required(),
       classLevel: Joi.string().trim().min(1).max(20).required(),
-      arm: Joi.string().trim().min(1).max(50).required(),
+      arm: Joi.string().trim().min(1).max(50).allow(null, "").optional(),
     })
   ).min(1).required(),
 }).required();
@@ -134,8 +143,6 @@ export const subjectSetupValidationSchema = Joi.object({
   subjects: Joi.array().items(
     Joi.object({
       subjectName: Joi.string().trim().min(1).max(100).required(),
-      subjectCode: Joi.string().trim().max(20).allow(null, "").optional(),
-      category: Joi.string().trim().max(50).allow(null, "").optional(),
     })
   ).min(1).required(),
 }).required();

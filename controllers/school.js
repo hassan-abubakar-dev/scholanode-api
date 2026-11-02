@@ -8,24 +8,48 @@ import { School, User, Session, Term, Class, Subject, Owner, VerificationCode } 
 import bcrypt from 'bcryptjs';
 import sendEmail from '../config/emailService.js';
 
-import { Op } from 'sequelize';
+import { Op, col, fn, where as sequelizeWhere } from 'sequelize';
 
 import { dbConnection } from "../config/db.js";
 
 import pricingConfig from '../config/pricing.js';
+import { getPublicFileUrl } from "../services/storage/r2.service.js";
 import generateStaffLoginId from '../services/generateStaffLoginId.js';
 import AppError from '../utils/AppError.js';
 import generateExpiryTime from '../utils/experyTime.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = process.env.NODE_ENV === "development";
+
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
+
+const rollbackTransaction = async (transaction, label) => {
+  if (!transaction || transaction.finished) {
+    return;
+  }
+
+  try {
+    await transaction.rollback();
+  } catch (error) {
+    console.error(label, {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    });
+  }
+};
 
 
 export const checkSchoolCode = async (req, res, next) => {
   try {
     const schoolCode = req.query.schoolCode?.trim();
-    console.log('Checking school code availability:', schoolCode);
-
     const school = await School.findOne({ where: { schoolCode } });
 
     return res.status(200).json({
@@ -74,9 +98,15 @@ export const getSchoolByCode = async (req, res, next) => {
       });
     }
 
+    const schoolData = school.toJSON();
+    delete schoolData.logoKey;
+
     return res.status(200).json({
       status: 'success',
-      data: school,
+      data: {
+        ...schoolData,
+        logoUrl: getPublicFileUrl(school.logoKey),
+      },
     });
   } catch (error) {
     return handleControllerError(
@@ -96,18 +126,15 @@ export const getSchoolByCode = async (req, res, next) => {
  * @param {Object} res - Express response object
  */
 export const registerSchool = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
 
   try {
+    transaction = await dbConnection.transaction();
     const {
       school: schoolData,
       admin: adminData,
       plan: planData,
     } = req.body;
-
-    console.log('School data:', schoolData);
-    console.log('Admin data:', adminData);
-    console.log('Plan data:', planData);
 
     const {
       schoolName,
@@ -161,135 +188,89 @@ export const registerSchool = async (req, res, next) => {
     }
 
     const databaseRole = normalizedRole;
-    const normalizedPlan = plan?.trim().toUpperCase();
+    const normalizedPlan = plan.trim().toUpperCase();
 
     // =========================================================
     // VALIDATE TIER / BILLING CYCLE
     // =========================================================
 
-    let planPrice = null;
+    let planPrice = 0;
+    let normalizedTierId = null;
+    let normalizedBillingCycle = null;
 
-    if (tierId && billingCycle) {
+    if (normalizedPlan !== "FREE") {
+      normalizedTierId = String(tierId ?? "").trim();
+      normalizedBillingCycle = String(billingCycle ?? "")
+        .trim()
+        .toUpperCase();
+
+      if (!normalizedTierId || !normalizedBillingCycle) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: "Paid plans require a tier and billing cycle.",
+        });
+      }
+
       const planTiers = pricingConfig[normalizedPlan];
 
+      if (!Array.isArray(planTiers) || planTiers.length === 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          status: "error",
+          message: `Pricing for ${normalizedPlan} is not configured.`,
+        });
+      }
+
       const tier = planTiers.find(
-        (item) => item.id === tierId
+        (item) => String(item.id) === normalizedTierId
       );
 
       if (!tier) {
         await transaction.rollback();
-
         return res.status(400).json({
           status: "error",
-          message: `Invalid tier ID for plan ${normalizedPlan}`,
+          message: `Invalid tier ID for plan ${normalizedPlan}.`,
         });
       }
 
-      const normalizedBillingCycle =
-        billingCycle.trim().toUpperCase();
-
       const pricing = tier[normalizedBillingCycle];
 
-      if (!pricing) {
+      if (!pricing || typeof pricing.price !== "number") {
         await transaction.rollback();
-
         return res.status(400).json({
           status: "error",
-          message: `Billing cycle ${billingCycle} is not available for tier ${tierId}`,
+          message: `Billing cycle ${normalizedBillingCycle} is not available for tier ${normalizedTierId}.`,
         });
       }
 
       planPrice = pricing.price;
     }
 
-    // =========================================================
-    // 9. FIND AN UNFINISHED REGISTRATION
-    // =========================================================
-    //
-    // Our rule:
-    //
-    // Same school name
-    // + same address
-    // + PENDING_VERIFICATION
-    //
-    // = unfinished registration that can be replaced.
-    //
-    // We deliberately do NOT destroy ACTIVE,
-    // PENDING_ACTIVATION or SUSPENDED schools.
-    // =========================================================
-
+    // Do not replace an existing pending registration without proving
+    // ownership through the existing verification flow.
     const pendingSchool = await School.findOne({
       where: {
-        schoolName: normalizedSchoolName,
-        address: normalizedAddress,
+        [Op.and]: [
+          sequelizeWhere(
+            fn("LOWER", col("schoolName")),
+            normalizedSchoolName.toLowerCase()
+          ),
+          sequelizeWhere(
+            fn("LOWER", col("address")),
+            normalizedAddress.toLowerCase()
+          ),
+        ],
         status: "PENDING_VERIFICATION",
       },
       transaction,
     });
 
     if (pendingSchool) {
-      // -------------------------------------------------------
-      // Find owners belonging to this pending school
-      // -------------------------------------------------------
-
-      const existingOwner = await Owner.findOne({
-        where: {
-          schoolId: pendingSchool.id,
-        },
-        transaction,
-      });
-
-      const existingUserId = existingOwner?.userId;
-
-      // -------------------------------------------------------
-      // Delete verification codes belonging to old users
-      // -------------------------------------------------------
-
-      if (existingUserId) {
-        const existingUser = await User.findByPk(existingUserId, {
-          transaction,
-        });
-
-        if (existingUser?.email) {
-          await VerificationCode.destroy({
-            where: {
-              userEmail: existingUser.email,
-            },
-            transaction,
-          });
-        }
-      }
-
-      // -------------------------------------------------------
-      // Delete Owner relationships
-      // -------------------------------------------------------
-
-      await Owner.destroy({
-        where: {
-          schoolId: pendingSchool.id,
-        },
-        transaction,
-      });
-
-      // -------------------------------------------------------
-      // Delete users belonging to the old registration
-      // -------------------------------------------------------
-
-      if (existingUserId) {
-        await User.destroy({
-          where: {
-            id: existingUserId,
-          },
-          transaction,
-        });
-      }
-
-      // -------------------------------------------------------
-      // Delete the old pending school
-      // -------------------------------------------------------
-
-      await pendingSchool.destroy({
-        transaction,
+      await transaction.rollback();
+      return res.status(409).json({
+        status: "error",
+        message: "A registration for this school is already being processed.",
       });
     }
 
@@ -349,8 +330,6 @@ export const registerSchool = async (req, res, next) => {
         // Registration has not yet been verified.
         status: "PENDING_VERIFICATION",
 
-        // Keep this false until the school becomes active.
-        isActive: false,
       },
       {
         transaction,
@@ -463,7 +442,7 @@ export const registerSchool = async (req, res, next) => {
         ">
 
           <p style="font-size: 16px;">
-            Hello ${firstName},
+            Hello ${escapeHtml(firstName)},
           </p>
 
           <p style="
@@ -471,7 +450,7 @@ export const registerSchool = async (req, res, next) => {
             line-height: 1.6;
           ">
             Thank you for registering
-            <strong>${normalizedSchoolName}</strong>
+            <strong>${escapeHtml(normalizedSchoolName)}</strong>
             with ScholaNode.
           </p>
 
@@ -496,7 +475,7 @@ export const registerSchool = async (req, res, next) => {
               border-radius: 5px;
               letter-spacing: 5px;
             ">
-              ${verificationCode}
+              ${escapeHtml(verificationCode)}
             </span>
           </div>
 
@@ -520,7 +499,7 @@ export const registerSchool = async (req, res, next) => {
               font-size: 18px;
               font-weight: bold;
             ">
-              ${loginId}
+              ${escapeHtml(loginId)}
             </p>
 
           </div>
@@ -567,10 +546,10 @@ export const registerSchool = async (req, res, next) => {
       </div>
     `;
 
-    // =========================================================
-    // 19. EMAIL MUST SUCCEED BEFORE COMMIT
-    // =========================================================
+    // Commit registration data before sending external email.
+    await transaction.commit();
 
+    let verificationEmailSent = true;
     try {
       await sendEmail({
         to: normalizedUserEmail,
@@ -581,35 +560,18 @@ export const registerSchool = async (req, res, next) => {
       console.error(
         "REGISTER_SCHOOL_EMAIL_ERROR: Failed to send verification email",
         {
-          email: normalizedUserEmail,
           schoolId: newSchool.id,
-          error: emailError,
+          error: emailError.message,
         }
       );
-
-      await transaction.rollback();
-
-      return res.status(500).json({
-        status: "error",
-        message:
-          "Failed to send verification email. Please try again.",
-      });
+      verificationEmailSent = false;
     }
-
-    // =========================================================
-    // 20. COMMIT
-    // =========================================================
-
-    await transaction.commit();
-
-    // =========================================================
-    // 21. RESPONSE
-    // =========================================================
 
     return res.status(201).json({
       status: "success",
-      message:
-        `Registration successful. A verification code has been sent to ${normalizedUserEmail}.`,
+      message: verificationEmailSent
+        ? `Registration successful. A verification code has been sent to ${normalizedUserEmail}.`
+        : "Registration successful, but the verification email could not be sent. Please request a new verification email.",
 
       data: {
         school: {
@@ -619,7 +581,6 @@ export const registerSchool = async (req, res, next) => {
           schoolLevel: newSchool.schoolLevel,
           ownershipType: newSchool.ownershipType,
           status: newSchool.status,
-          isActive: newSchool.isActive,
         },
 
         user: {
@@ -633,9 +594,9 @@ export const registerSchool = async (req, res, next) => {
 
         plan: {
           plan: normalizedPlan,
-          tierId: tierId || null,
-          billingCycle: billingCycle || null,
-          price: planPrice || "FREE",
+          tierId: normalizedTierId,
+          billingCycle: normalizedBillingCycle,
+          price: planPrice,
         },
       },
     });
@@ -644,21 +605,25 @@ export const registerSchool = async (req, res, next) => {
     // UNEXPECTED ERROR
     // =========================================================
 
-    try {
-      await transaction.rollback();
-    } catch (rollbackError) {
-      console.error(
-        "REGISTER_SCHOOL_ROLLBACK_ERROR:",
-        rollbackError
-      );
-    }
+    await rollbackTransaction(transaction, "REGISTER_SCHOOL_ROLLBACK_ERROR");
 
     console.error("REGISTER_SCHOOL_ERROR:", {
       url: req.originalUrl,
       method: req.method,
       ip: req.ip,
-      error,
+      error: {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
     });
+
+    if (error.name === "SequelizeUniqueConstraintError") {
+      return res.status(409).json({
+        status: "error",
+        message: "A school or account with these details already exists.",
+      });
+    }
 
     return res.status(500).json({
       status: "error",
@@ -699,16 +664,10 @@ export const getSchoolSetupProgress = async (req, res, next) => {
       school.supportPhone?.trim()
     );
 
-    const logoCompleted = Boolean(
-      school.logoUrl?.trim()
-    );
+    const logoCompleted = Boolean(school.logoKey?.trim());
 
     const welcomeMessageCompleted = Boolean(
       school.welcomeMessage?.trim()
-    );
-
-    const websiteCompleted = Boolean(
-      school.website?.trim()
     );
 
     // 4. Calculate progress
@@ -717,10 +676,9 @@ export const getSchoolSetupProgress = async (req, res, next) => {
       supportPhoneCompleted,
       logoCompleted,
       welcomeMessageCompleted,
-      websiteCompleted,
     ].filter(Boolean).length;
 
-    const totalSteps = 5;
+    const totalSteps = 4;
 
     const progress = Math.round(
       (completedSteps / totalSteps) * 100
@@ -737,7 +695,6 @@ export const getSchoolSetupProgress = async (req, res, next) => {
           supportPhone: supportPhoneCompleted,
           logo: logoCompleted,
           welcomeMessage: welcomeMessageCompleted,
-          website: websiteCompleted,
         },
       },
     });
@@ -769,7 +726,23 @@ export const getMySchool = async (req, res, next) => {
       );
     }
 
-    const school = await School.findByPk(schoolId);
+    const school = await School.findByPk(schoolId, {
+      attributes: [
+        "id",
+        "schoolName",
+        "schoolCode",
+        "address",
+        "schoolLevel",
+        "ownershipType",
+        "supportEmail",
+        "supportPhone",
+        "logoKey",
+        "welcomeMessage",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ],
+    });
 
     if (!school) {
       return next(
@@ -780,9 +753,15 @@ export const getMySchool = async (req, res, next) => {
       );
     }
 
+    const schoolData = school.toJSON();
+    delete schoolData.logoKey;
+
     return res.status(200).json({
       success: true,
-      school,
+      school: {
+        ...schoolData,
+        logoUrl: getPublicFileUrl(school.logoKey),
+      },
     });
   } catch (error) {
     return handleControllerError(error, next, req, "SCHOOL_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
@@ -800,28 +779,24 @@ export const getMySchool = async (req, res, next) => {
  */
 export const updateSchoolSetup = async (req, res, next) => {
   try {
-    const { schoolId } = req.user;
+    const schoolId = req.user?.schoolId;
+
+    if (!schoolId) {
+      return next(new AppError("Authenticated school not found.", 401));
+    }
 
     const {
-      logoUrl,
-      logoPublicId,
+      logoKey,
       welcomeMessage,
-      loginInstructions,
-      registrationGuidelines,
       supportEmail,
       supportPhone,
-      website,
     } = req.body;
 
     const updates = {
-      logoUrl,
-      logoPublicId,
+      logoKey,
       welcomeMessage,
-      loginInstructions,
-      registrationGuidelines,
       supportEmail,
       supportPhone,
-      website,
     };
 
     // Remove fields that were not provided in the request
@@ -839,10 +814,16 @@ export const updateSchoolSetup = async (req, res, next) => {
 
     await school.update(updates);
 
+    const schoolData = school.toJSON();
+    delete schoolData.logoKey;
+
     return res.status(200).json({
       status: "success",
       message: "School setup updated successfully.",
-      data: school,
+      data: {
+        ...schoolData,
+        logoUrl: getPublicFileUrl(school.logoKey),
+      },
     });
   } catch (err) {
     const errorContext = {
@@ -853,7 +834,11 @@ export const updateSchoolSetup = async (req, res, next) => {
 
     console.error("UPDATE_SCHOOL_SETUP_ERROR:", {
       context: errorContext,
-      error: err,
+      error: {
+        name: err.name,
+        message: err.message,
+        stack: err.stack,
+      },
     });
 
     return next(
@@ -870,15 +855,21 @@ export const updateSchoolSetup = async (req, res, next) => {
 
 
 export const createAcademicSetup = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
 
   try {
-    const { id } = req.params;
+    transaction = await dbConnection.transaction();
+    const schoolId = req.user?.schoolId;
     const { session, terms } = req.body;
 
-    // 1. Check that the school exists
-    const school = await School.findByPk(id, {
+    if (!schoolId) {
+      await transaction.rollback();
+      return next(new AppError("Authenticated school not found.", 401));
+    }
+
+    const school = await School.findByPk(schoolId, {
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!school) {
@@ -886,8 +877,37 @@ export const createAcademicSetup = async (req, res, next) => {
       return next(new AppError("School not found.", 404));
     }
 
-    // 2. Check that every term falls inside the session range
-    for (const term of terms) {
+    const normalizedTerms = terms.map((term) => ({
+      ...term,
+      termName: term.termName.trim().toUpperCase(),
+    }));
+    const termNames = normalizedTerms.map((term) => term.termName);
+
+    if (
+      new Set(termNames).size !== 3 ||
+      !["FIRST_TERM", "SECOND_TERM", "THIRD_TERM"].every((name) =>
+        termNames.includes(name)
+      )
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError(
+          "The academic session must contain FIRST_TERM, SECOND_TERM, and THIRD_TERM exactly once.",
+          400
+        )
+      );
+    }
+
+    const termsByName = Object.fromEntries(
+      normalizedTerms.map((term) => [term.termName, term])
+    );
+    const orderedTerms = [
+      termsByName.FIRST_TERM,
+      termsByName.SECOND_TERM,
+      termsByName.THIRD_TERM,
+    ];
+
+    for (const term of orderedTerms) {
       if (
         new Date(term.startDate) < new Date(session.startDate) ||
         new Date(term.endDate) > new Date(session.endDate)
@@ -902,11 +922,38 @@ export const createAcademicSetup = async (req, res, next) => {
       }
     }
 
+    const firstTerm = termsByName.FIRST_TERM;
+    const secondTerm = termsByName.SECOND_TERM;
+    const thirdTerm = termsByName.THIRD_TERM;
+
+    if (
+      new Date(firstTerm.startDate) >= new Date(secondTerm.startDate) ||
+      new Date(secondTerm.startDate) >= new Date(thirdTerm.startDate)
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError(
+          "FIRST_TERM, SECOND_TERM, and THIRD_TERM must occur in chronological order.",
+          400
+        )
+      );
+    }
+
+    if (
+      new Date(firstTerm.endDate) >= new Date(secondTerm.startDate) ||
+      new Date(secondTerm.endDate) >= new Date(thirdTerm.startDate)
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError("Academic term dates must not overlap.", 400)
+      );
+    }
+
     // 6. Check for an existing session with the same name
     const existingSession = await Session.findOne({
       where: {
-        schoolId: id,
-        sessionName: session.sessionName,
+        schoolId,
+        sessionName: session.sessionName.trim(),
       },
       transaction,
     });
@@ -924,7 +971,7 @@ export const createAcademicSetup = async (req, res, next) => {
     // 7. Create the session
     const newSession = await Session.create(
       {
-        schoolId: id,
+        schoolId,
         sessionName: session.sessionName,
         startDate: session.startDate,
         endDate: session.endDate,
@@ -936,7 +983,7 @@ export const createAcademicSetup = async (req, res, next) => {
 
     // 8. Create the terms
     const newTerms = await Term.bulkCreate(
-      terms.map((term) => ({
+      normalizedTerms.map((term) => ({
         sessionId: newSession.id,
         termName: term.termName,
         startDate: term.startDate,
@@ -968,8 +1015,15 @@ export const createAcademicSetup = async (req, res, next) => {
       data: createdSession,
     });
   } catch (err) {
-    if (transaction && !transaction.finished) {
-      await transaction.rollback();
+    await rollbackTransaction(transaction, "CREATE_SCHOOL_ONBOARDING_ROLLBACK_ERROR");
+
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return next(
+        new AppError(
+          "An academic session with this name already exists for this school.",
+          409
+        )
+      );
     }
 
     const errorContext = {
@@ -980,7 +1034,11 @@ export const createAcademicSetup = async (req, res, next) => {
 
     console.error("CREATE_SCHOOL_ONBOARDING_ERROR:", {
       context: errorContext,
-      error: err,
+      error: {
+        name: err.name,
+        message: err.message,
+        stack: err.stack,
+      },
     });
 
     return next(
@@ -996,14 +1054,21 @@ export const createAcademicSetup = async (req, res, next) => {
 
 
 export const createClassSetup = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
 
   try {
-    const { id: schoolId } = req.params;
+    transaction = await dbConnection.transaction();
+    const schoolId = req.user?.schoolId;
     const { classes } = req.body;
+
+    if (!schoolId) {
+      await transaction.rollback();
+      return next(new AppError("Authenticated school not found.", 401));
+    }
 
     const school = await School.findByPk(schoolId, {
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!school) {
@@ -1011,10 +1076,17 @@ export const createClassSetup = async (req, res, next) => {
       return next(new AppError("School not found.", 404));
     }
 
+    const normalizedClasses = classes.map(({ classLevel, arm }) => ({
+      schoolId,
+      classLevel: classLevel.trim().toUpperCase(),
+      arm: typeof arm === "string" && arm.trim()
+        ? arm.trim().toUpperCase()
+        : null,
+    }));
+
     // Prevent duplicates inside the same request
-    const classKeys = classes.map(
-      ({ classLevel, arm }) =>
-        `${classLevel.trim().toLowerCase()}::${arm.trim().toLowerCase()}`
+    const classKeys = normalizedClasses.map(
+      ({ classLevel, arm }) => `${classLevel}::${arm ?? ""}`
     );
 
     if (new Set(classKeys).size !== classKeys.length) {
@@ -1033,19 +1105,26 @@ export const createClassSetup = async (req, res, next) => {
         schoolId,
       },
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     const existingKeys = new Set(
       existingClasses.map(
         ({ classLevel, arm }) =>
-          `${classLevel.trim().toLowerCase()}::${arm.trim().toLowerCase()}`
+          `${classLevel.trim().toUpperCase()}::${
+            typeof arm === "string" && arm.trim()
+              ? arm.trim().toUpperCase()
+              : ""
+          }`
       )
     );
 
-    for (const classItem of classes) {
-      const key = `${classItem.classLevel.trim().toLowerCase()}::${classItem.arm
-        .trim()
-        .toLowerCase()}`;
+    const submittedLevels = new Set(
+      normalizedClasses.map(({ classLevel }) => classLevel)
+    );
+
+    for (const classItem of normalizedClasses) {
+      const key = `${classItem.classLevel}::${classItem.arm ?? ""}`;
 
       if (existingKeys.has(key)) {
         await transaction.rollback();
@@ -1058,13 +1137,41 @@ export const createClassSetup = async (req, res, next) => {
       }
     }
 
+    for (const level of submittedLevels) {
+      const hasUnarmedExisting = existingClasses.some(
+        ({ classLevel, arm }) =>
+          classLevel.trim().toUpperCase() === level &&
+          !(typeof arm === "string" && arm.trim())
+      );
+      const hasArmedExisting = existingClasses.some(
+        ({ classLevel, arm }) =>
+          classLevel.trim().toUpperCase() === level &&
+          Boolean(typeof arm === "string" && arm.trim())
+      );
+      const hasUnarmedSubmitted = normalizedClasses.some(
+        ({ classLevel, arm }) => classLevel === level && arm === null
+      );
+      const hasArmedSubmitted = normalizedClasses.some(
+        ({ classLevel, arm }) => classLevel === level && arm !== null
+      );
+
+      if (
+        (hasUnarmedExisting && hasArmedSubmitted) ||
+        (hasArmedExisting && hasUnarmedSubmitted) ||
+        (hasUnarmedSubmitted && hasArmedSubmitted)
+      ) {
+        await transaction.rollback();
+        return next(
+          new AppError(
+            `Class level "${level}" cannot have both an unarmed class and armed divisions.`,
+            409
+          )
+        );
+      }
+    }
+
     const createdClasses = await Class.bulkCreate(
-      classes.map(({ classCategory, classLevel, arm }) => ({
-        schoolId,
-        classCategory: classCategory.trim(),
-        classLevel: classLevel.trim(),
-        arm: arm.trim(),
-      })),
+      normalizedClasses,
       {
         transaction,
       }
@@ -1078,7 +1185,16 @@ export const createClassSetup = async (req, res, next) => {
       data: createdClasses,
     });
   } catch (err) {
-    await transaction.rollback();
+    await rollbackTransaction(transaction, "CREATE_CLASS_SETUP_ROLLBACK_ERROR");
+
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return next(
+        new AppError(
+          "One or more classes already exist for this school.",
+          409
+        )
+      );
+    }
 
     const errorContext = {
       url: req.originalUrl,
@@ -1088,7 +1204,11 @@ export const createClassSetup = async (req, res, next) => {
 
     console.error("CREATE_CLASS_SETUP_ERROR:", {
       context: errorContext,
-      error: err,
+      error: {
+        name: err.name,
+        message: err.message,
+        stack: err.stack,
+      },
     });
 
     return next(
@@ -1103,14 +1223,21 @@ export const createClassSetup = async (req, res, next) => {
 };
 
 export const createSubjectSetup = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
 
   try {
-    const { id: schoolId } = req.params;
+    transaction = await dbConnection.transaction();
+    const schoolId = req.user?.schoolId;
     const { subjects } = req.body;
+
+    if (!schoolId) {
+      await transaction.rollback();
+      return next(new AppError("Authenticated school not found.", 401));
+    }
 
     const school = await School.findByPk(schoolId, {
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!school) {
@@ -1163,11 +1290,9 @@ export const createSubjectSetup = async (req, res, next) => {
 
     const createdSubjects = await Subject.bulkCreate(
       subjects.map(
-        ({ subjectName, subjectCode, category }) => ({
+        ({ subjectName }) => ({
           schoolId,
           subjectName: subjectName.trim(),
-          subjectCode: subjectCode?.trim() || null,
-          category: category?.trim() || null,
         })
       ),
       {
@@ -1183,7 +1308,16 @@ export const createSubjectSetup = async (req, res, next) => {
       data: createdSubjects,
     });
   } catch (err) {
-    await transaction.rollback();
+    await rollbackTransaction(transaction, "CREATE_SUBJECT_SETUP_ROLLBACK_ERROR");
+
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return next(
+        new AppError(
+          "One or more subjects already exist for this school.",
+          409
+        )
+      );
+    }
 
     const errorContext = {
       url: req.originalUrl,
@@ -1193,7 +1327,11 @@ export const createSubjectSetup = async (req, res, next) => {
 
     console.error("CREATE_SUBJECT_SETUP_ERROR:", {
       context: errorContext,
-      error: err,
+      error: {
+        name: err.name,
+        message: err.message,
+        stack: err.stack,
+      },
     });
 
     return next(

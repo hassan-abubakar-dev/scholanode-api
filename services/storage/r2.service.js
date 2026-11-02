@@ -117,6 +117,11 @@ export const uploadPublicFile = async ({
   };
 };
 
+export const getPublicFileUrl = (key) =>
+  key && r2Config.public.publicUrl
+    ? `${r2Config.public.publicUrl.replace(/\/+$/, "")}/${key}`
+    : null;
+
 export const deletePublicFile = async (key) => {
   return deleteObject({
     client: publicR2Client,

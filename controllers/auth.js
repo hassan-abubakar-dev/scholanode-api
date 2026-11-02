@@ -18,7 +18,10 @@ import generateToken from '../utils/token.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 import generateExpiryTime from '../utils/experyTime.js';
 
-import { getPrivateFileUrl } from "../services/storage/r2.service.js";
+import {
+  getPrivateFileUrl,
+  getPublicFileUrl,
+} from "../services/storage/r2.service.js";
 
 
 dotenv.config();
@@ -362,7 +365,7 @@ export const getLoggedInUser = async (req, res, next) => {
           schoolLevel: school.schoolLevel,
           ownershipType: school.ownershipType,
           status: school.status,
-          logoUrl: school.logoUrl,
+          logoUrl: getPublicFileUrl(school.logoKey),
         }
       : null;
 

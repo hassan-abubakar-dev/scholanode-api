@@ -1,6 +1,4 @@
 const pricingConfig = {
-  FREE: [],
-  
   STARTER: [
     {
       id: "STARTER_1_300",
