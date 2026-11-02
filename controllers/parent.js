@@ -6,6 +6,7 @@ import sendEmail from '../config/emailService.js';
 import generateVerificationCode from "../utils/verificationCode.js";
 import generateExpiryTime from "../utils/experyTime.js";
 import { likeCondition } from "../utils/dbHelper.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -1408,7 +1409,7 @@ export const getParentDashboard = async (req, res, next) => {
           attributes: [
             "firstName",
             "surName",
-            "profileImageUrl",
+            "profileImageKey",
           ],
           required: true,
           where: {
@@ -1617,7 +1618,9 @@ export const getParentDashboard = async (req, res, next) => {
         parent: {
           firstName: parent.user.firstName,
           surName: parent.user.surName,
-          profileImageUrl: parent.user.profileImageUrl,
+          profileImageUrl: parent.user.profileImageKey
+            ? await getPrivateFileUrl(parent.user.profileImageKey)
+            : null,
         },
 
         summary: {

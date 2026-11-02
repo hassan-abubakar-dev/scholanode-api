@@ -6,6 +6,7 @@ import AppError from "../utils/AppError.js";
 
 import { dbConnection } from "../config/db.js";
 import { likeCondition } from "../utils/dbHelper.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 
 // Staff roles that may scan when explicitly authorized.
@@ -59,13 +60,15 @@ const getActiveScannerManager = async (schoolId, userId) => {
 };
 
 // Return only the student information needed for gate verification.
-const formatStudent = (student) => ({
+const formatStudent = async (student) => ({
   studentId: student.id,
   firstName: student.user.firstName,
   surName: student.user.surName,
   admissionNumber: student.admissionNumber,
   gender: student.gender,
-  profileImageUrl: student.user.profileImageUrl,
+  profileImageUrl: student.user.profileImageKey
+    ? await getPrivateFileUrl(student.user.profileImageKey)
+    : null,
   admissionStatus: student.admissionStatus,
   class: student.class
     ? {
@@ -244,7 +247,7 @@ export const verifyStudent = async (req, res, next) => {
           attributes: [
             "firstName",
             "surName",
-            "profileImageUrl",
+            "profileImageKey",
           ],
           required: true,
           where: { schoolId },
@@ -349,7 +352,7 @@ export const verifyStudent = async (req, res, next) => {
                 attributes: [
                   "firstName",
                   "surName",
-                  "profileImageUrl",
+                  "profileImageKey",
                 ],
                 required: true,
                 where: { schoolId },
@@ -373,7 +376,7 @@ export const verifyStudent = async (req, res, next) => {
         if (familyStudent) {
           uniqueFamily.set(
             familyStudent.id,
-            formatStudent(familyStudent)
+            await formatStudent(familyStudent)
           );
         }
       }
@@ -426,7 +429,7 @@ export const verifyStudent = async (req, res, next) => {
       success: true,
       message: "Student verified successfully.",
       student: {
-        ...formatStudent(student),
+        ...(await formatStudent(student)),
         scanStatus: createScanStatus(student.id),
       },
       familyMembers: familyMembers.map((member) => ({

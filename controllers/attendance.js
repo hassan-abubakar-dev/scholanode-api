@@ -2,6 +2,7 @@ import { handleControllerError } from "../utils/controllerError.js";
 import { Class, Student, User, Session, Term, WorkingDay, AttendanceRegister, AttendanceRecord } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 // Get today's attendance page for the authenticated form master.
 
@@ -133,7 +134,7 @@ export const getTodayAttendance = async (req, res, next) => {
           attributes: [
             "firstName",
             "surName",
-            "profileImageUrl",
+            "profileImageKey",
           ],
         },
       ],
@@ -156,17 +157,21 @@ export const getTodayAttendance = async (req, res, next) => {
     );
 
     // 8. Return the complete roster with saved attendance statuses.
-    const students = classStudents.map((student) => ({
-      studentId: student.id,
-      admissionNumber: student.admissionNumber,
-      firstName: student.user?.firstName ?? null,
-      surName: student.user?.surName ?? null,
-      gender: student.gender,
-      profileImageUrl: student.user?.profileImageUrl ?? null,
-      status: statusByStudentId.has(student.id)
-        ? statusByStudentId.get(student.id)
-        : null,
-    }));
+    const students = await Promise.all(
+      classStudents.map(async (student) => ({
+        studentId: student.id,
+        admissionNumber: student.admissionNumber,
+        firstName: student.user?.firstName ?? null,
+        surName: student.user?.surName ?? null,
+        gender: student.gender,
+        profileImageUrl: student.user?.profileImageKey
+          ? await getPrivateFileUrl(student.user.profileImageKey)
+          : null,
+        status: statusByStudentId.has(student.id)
+          ? statusByStudentId.get(student.id)
+          : null,
+      }))
+    );
 
     return res.status(200).json({
       success: true,
@@ -353,7 +358,7 @@ export const createTodayAttendance = async (req, res, next) => {
           attributes: [
             "firstName",
             "surName",
-            "profileImageUrl",
+            "profileImageKey",
           ],
         },
       ],
@@ -384,15 +389,19 @@ export const createTodayAttendance = async (req, res, next) => {
 
     // No AttendanceRecord rows are created until the draft is saved.
 
-    const students = classStudents.map((student) => ({
-      studentId: student.id,
-      admissionNumber: student.admissionNumber,
-      firstName: student.user?.firstName ?? null,
-      surName: student.user?.surName ?? null,
-      gender: student.gender,
-      profileImageUrl: student.user?.profileImageUrl ?? null,
-      status: null,
-    }));
+    const students = await Promise.all(
+      classStudents.map(async (student) => ({
+        studentId: student.id,
+        admissionNumber: student.admissionNumber,
+        firstName: student.user?.firstName ?? null,
+        surName: student.user?.surName ?? null,
+        gender: student.gender,
+        profileImageUrl: student.user?.profileImageKey
+          ? await getPrivateFileUrl(student.user.profileImageKey)
+          : null,
+        status: null,
+      }))
+    );
 
     await transaction.commit();
 

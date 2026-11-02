@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { dbConnection } from "../config/db.js";
 import { Op, fn, col, where as sequelizeWhere } from "sequelize";
 import { likeCondition } from "../utils/dbHelper.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 export const createStudent = async (req, res, next) => {
   let transaction;
@@ -256,7 +257,7 @@ export const getAllStudents = async (req, res, next) => {
             "firstName",
             "surName",
             "status",
-            "profileImageUrl",
+            "profileImageKey",
             "lastLoginAt",
           ],
           required: true,
@@ -332,29 +333,33 @@ export const getAllStudents = async (req, res, next) => {
       }),
     ]);
 
-    const students = rows.map((student) => {
-      const item = student.toJSON();
+    const students = await Promise.all(
+      rows.map(async (student) => {
+        const item = student.toJSON();
 
-      return {
-        id: item.id,
-        userId: item.userId,
-        firstName: item.user.firstName,
-        surName: item.user.surName,
-        admissionNumber: item.admissionNumber,
-        gender: item.gender,
-        dateOfBirth: item.dateOfBirth,
-        currentClassId: item.currentClassId,
-        currentClass: item.currentClass?.classLevel ?? null,
-        currentArm: item.currentClass?.arm ?? null,
-        enrollmentDate: item.enrollmentDate,
-        admissionStatus: item.admissionStatus,
-        status: item.user.status,
-        profileImageUrl: item.user.profileImageUrl,
-        lastLoginAt: item.user.lastLoginAt,
-        parentCount: parentCounts.get(item.id) ?? 0,
-        createdAt: item.createdAt,
-      };
-    });
+        return {
+          id: item.id,
+          userId: item.userId,
+          firstName: item.user.firstName,
+          surName: item.user.surName,
+          admissionNumber: item.admissionNumber,
+          gender: item.gender,
+          dateOfBirth: item.dateOfBirth,
+          currentClassId: item.currentClassId,
+          currentClass: item.currentClass?.classLevel ?? null,
+          currentArm: item.currentClass?.arm ?? null,
+          enrollmentDate: item.enrollmentDate,
+          admissionStatus: item.admissionStatus,
+          status: item.user.status,
+          profileImageUrl: item.user.profileImageKey
+            ? await getPrivateFileUrl(item.user.profileImageKey)
+            : null,
+          lastLoginAt: item.user.lastLoginAt,
+          parentCount: parentCounts.get(item.id) ?? 0,
+          createdAt: item.createdAt,
+        };
+      })
+    );
 
     const totalPages = Math.ceil(count / pageSize);
 

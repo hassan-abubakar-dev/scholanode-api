@@ -12,6 +12,7 @@ import sendEmail  from "../config/emailService.js";
 import { parse } from "csv-parse/sync";
 import AppError from "../utils/AppError.js";
 import { staffCsvRowSchema } from "../validation/staff.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 
 const escapeHtml = (value) =>
@@ -99,7 +100,7 @@ export const getAllStaff = async (req, res, next) => {
         "surName",
         "email",
         "phoneNumber",
-        "profileImageUrl",
+        "profileImageKey",
         "loginId",
         "role",
         "status",
@@ -126,9 +127,22 @@ export const getAllStaff = async (req, res, next) => {
       }
     }
 
+    const staffWithImages = await Promise.all(
+      staff.map(async (member) => {
+        const { profileImageKey, ...rest } = member.toJSON();
+
+        return {
+          ...rest,
+          profileImageUrl: profileImageKey
+            ? await getPrivateFileUrl(profileImageKey)
+            : null,
+        };
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      staff,
+      staff: staffWithImages,
       summary,
     });
   } catch (error) {
@@ -335,7 +349,9 @@ export const updateStaff = async (req, res, next) => {
         surName: staff.surName,
         email: staff.email,
         phoneNumber: staff.phoneNumber,
-        profileImageUrl: staff.profileImageUrl,
+        profileImageUrl: staff.profileImageKey
+          ? await getPrivateFileUrl(staff.profileImageKey)
+          : null,
         loginId: staff.loginId,
         role: staff.role,
         status: staff.status,

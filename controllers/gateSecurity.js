@@ -8,6 +8,7 @@ import { dbConnection } from "../config/db.js";
 import generateSecurityLoginId from "../services/generateSecurityLoginId.js";
 import sendEmail from "../config/emailService.js";
 import AppError from "../utils/AppError.js";
+import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (character) => ({
@@ -24,7 +25,7 @@ const securityAttributes = [
   "surName",
   "email",
   "phoneNumber",
-  "profileImageUrl",
+  "profileImageKey",
   "loginId",
   "role",
   "status",
@@ -257,9 +258,22 @@ export const getSecurityPersonnel = async (req, res, next) => {
       }
     }
 
+    const personnelWithImages = await Promise.all(
+      personnel.map(async (person) => {
+        const { profileImageKey, ...rest } = person.toJSON();
+
+        return {
+          ...rest,
+          profileImageUrl: profileImageKey
+            ? await getPrivateFileUrl(profileImageKey)
+            : null,
+        };
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      securityPersonnel: personnel,
+      securityPersonnel: personnelWithImages,
       summary,
     });
   } catch (error) {
@@ -338,7 +352,9 @@ export const updateSecurityPersonnel = async (req, res, next) => {
         surName: personnel.surName,
         email: personnel.email,
         phoneNumber: personnel.phoneNumber,
-        profileImageUrl: personnel.profileImageUrl,
+        profileImageUrl: personnel.profileImageKey
+          ? await getPrivateFileUrl(personnel.profileImageKey)
+          : null,
         loginId: personnel.loginId,
         role: personnel.role,
         status: personnel.status,
