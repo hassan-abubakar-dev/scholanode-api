@@ -36,6 +36,7 @@ const complaintSubmitters = [
   "PARENT",
   "STAFF",
   "EXAM_OFFICER",
+  "SECURITY",
 ];
 
 // Only these roles can manage the school complaint inbox.
