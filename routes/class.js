@@ -3,7 +3,7 @@ import {
   getSchoolClasses,
   assignFormMaster
 } from "../controllers/class.js";
-import { protectRoutes } from "../middleware/auth.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -11,12 +11,14 @@ const router = express.Router();
 router.get(
   "/get",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   getSchoolClasses
 );
 
 router.patch(
   "/class/:classId/form-master",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   assignFormMaster
 );
 

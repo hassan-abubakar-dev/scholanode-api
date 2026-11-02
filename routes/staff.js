@@ -7,17 +7,38 @@ import validate from "../middleware/validation.js";
 
 const router = express.Router();
 
-router.get("/get-all", protectRoutes, getAllStaff);
+router.get(
+  "/get-all",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  getAllStaff
+);
 
-router.patch("/:staffId/deactivate", protectRoutes, deactivateStaff);
+router.patch(
+  "/:staffId/deactivate",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  deactivateStaff
+);
 
-router.patch("/:staffId/activate", protectRoutes, activateStaff);
+router.patch(
+  "/:staffId/activate",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  activateStaff
+);
 
-router.get("/leader-status", protectRoutes, getLeaderStatus);
+router.get(
+  "/leader-status",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  getLeaderStatus
+);
 
 router.patch(
   "/:staffId",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(updateStaffSchema, "body"),
   updateStaff
 );
@@ -25,6 +46,7 @@ router.patch(
 router.patch(
   "/:staffId/reset-password",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   resetStaffPassword
 );
 

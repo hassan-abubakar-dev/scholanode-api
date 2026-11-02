@@ -8,6 +8,10 @@ import {
 } from "../controllers/platformContactInquiry.js";
 
 import  validate  from "../middleware/validation.js";
+import {
+  authorizePlatform,
+  protectPlatformRoutes,
+} from "../middleware/platformAuth.js";
 
 import {
   createContactInquirySchema,
@@ -35,8 +39,11 @@ router.post(
 // Protected platform routes
 // ========================================
 
-// All routes below require platform-user authentication
-// router.use(protectPlatformRoutes);
+router.use(
+  "/",
+  protectPlatformRoutes,
+  authorizePlatform("PLATFORM_ADMIN", "SUPPORT_AGENT")
+);
 
 
 // Get inquiry statistics

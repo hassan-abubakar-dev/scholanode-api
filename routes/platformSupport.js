@@ -23,13 +23,18 @@ import {
   escalationBodySchema,
 } from "../validation/platformSupport.js";
 
-// import protectPlatformRoutes from "../middlewares/protectPlatformRoutes.js";
 import  validate  from "../middleware/validation.js";
+import {
+  authorizePlatform,
+  protectPlatformRoutes,
+} from "../middleware/platformAuth.js";
 
 const router = Router();
  
-// All routes require platform authentication.
-// router.use(protectPlatformRoutes);
+router.use(
+  protectPlatformRoutes,
+  authorizePlatform("PLATFORM_ADMIN", "SUPPORT_AGENT")
+);
 
 // ------------------------------------------------------------
 // Inbox and conversation messages

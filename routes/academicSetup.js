@@ -6,7 +6,7 @@ import {
   saveWorkingDays,
   getAcademicSetupProgress,
 } from "../controllers/academicSetup.js";
-import { protectRoutes } from "../middleware/auth.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import {
   createSessionWithTermsSchema,
@@ -20,6 +20,7 @@ const router = express.Router();
 router.post(
   "/session",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(createSessionWithTermsSchema, "body"),
   createSessionWithTerms
 );
@@ -28,6 +29,7 @@ router.post(
 router.post(
   "/class",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(createClassSchema, "body"),
   createClass
 );
@@ -36,6 +38,7 @@ router.post(
 router.post(
   "/subject",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(createSubjectSchema, "body"),
   createSubject
 );
@@ -44,6 +47,7 @@ router.post(
 router.post(
   "/working-days",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   saveWorkingDays
 );  
 

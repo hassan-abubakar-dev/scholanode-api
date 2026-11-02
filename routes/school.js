@@ -12,7 +12,7 @@ import {
   createSubjectSetup
 } from "../controllers/school.js";
 
-import { protectRoutes } from "../middleware/auth.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import {
   registerSchoolValidationSchema,
@@ -69,6 +69,7 @@ router.get(
 router.patch(
   "/:id/setup",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(schoolIdParamSchema, "params"),
   validate(updateSchoolSetupSchema, "body"),
   updateSchoolSetup
@@ -78,6 +79,7 @@ router.patch(
 router.post(
   "/:id/academic-setup",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(schoolIdParamSchema, "params"),
   validate(academicSetupValidationSchema, "body"),
   createAcademicSetup
@@ -87,6 +89,7 @@ router.post(
 router.post(
   "/:id/class-setup",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(schoolIdParamSchema, "params"),
   validate(classSetupValidationSchema, "body"),
   createClassSetup
@@ -96,6 +99,7 @@ router.post(
 router.post(
   "/:id/subject-setup",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(schoolIdParamSchema, "params"),
   validate(subjectSetupValidationSchema, "body"),
   createSubjectSetup

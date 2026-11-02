@@ -18,7 +18,7 @@ import {
   getScanHistorySchema
 } from "../validation/gateScanner.js";
 
-import { protectRoutes } from "../middleware/auth.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 
 const router = express.Router();
@@ -44,6 +44,7 @@ router.post(
 router.get(
   "/permissions",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   getAuthorizedScanners
 );
 
@@ -51,6 +52,7 @@ router.get(
 router.post(
   "/permissions",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(authorizeStaffScannerSchema, "body"),
   authorizeStaffScanner
 );
@@ -59,6 +61,7 @@ router.post(
 router.patch(
   "/permissions/:userId/revoke",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(revokeStaffScannerParamsSchema, "params"),
   revokeStaffScanner
 );

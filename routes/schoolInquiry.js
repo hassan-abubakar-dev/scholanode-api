@@ -6,7 +6,7 @@ import {
   updateSchoolInquiryStatus,
 } from "../controllers/schoolInquiry.js";
 
-import { protectRoutes } from "../middleware/auth.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 
 import {
@@ -31,6 +31,7 @@ router.post(
 router.get(
   "/",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(getSchoolInquiriesQuerySchema, "query"),
   getSchoolInquiries
 );
@@ -40,6 +41,7 @@ router.get(
 router.patch(
   "/:id/status",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(schoolInquiryIdParamSchema, "params"),
   validate(updateSchoolInquiryStatusSchema, "body"),
   updateSchoolInquiryStatus
