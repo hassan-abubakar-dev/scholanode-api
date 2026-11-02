@@ -1,12 +1,5 @@
-import {
-  Class,
-  Subject,
-  User,
-  WorkingDay,
-  TimetablePeriod,
-  TimetableLesson,
-} from "../relationships/associations.js";
-
+import { handleControllerError } from "../utils/controllerError.js";
+import { Class, Subject, User, WorkingDay, TimetablePeriod, TimetableLesson } from "../relationships/associations.js";
 import { dbConnection } from "../config/db.js";
 import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
@@ -123,7 +116,7 @@ const ensureTeacherBelongsToSchool = async (
   return teacher;
 };
 
-const handleTimetableError = (error, next) => {
+const handleTimetableError = (error, next, req) => {
   if (
     error.name === "SequelizeUniqueConstraintError" ||
     error.name === "SequelizeExclusionConstraintError"
@@ -136,7 +129,13 @@ const handleTimetableError = (error, next) => {
     );
   }
 
-  return next(error);
+  return handleControllerError(
+    error,
+    next,
+    req,
+    "TIMETABLE_CONTROLLER_ERROR",
+    "Unable to process this request. Please try again."
+  );
 };
 
 /*
@@ -204,7 +203,7 @@ export const getTimetable = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "TIMETABLE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -253,7 +252,7 @@ export const createPeriod = async (req, res, next) => {
       data: { period },
     });
   } catch (error) {
-    return handleTimetableError(error, next);
+    return handleTimetableError(error, next, req);
   }
 };
 
@@ -314,7 +313,7 @@ export const updatePeriod = async (req, res, next) => {
       data: { period },
     });
   } catch (error) {
-    return handleTimetableError(error, next);
+    return handleTimetableError(error, next, req);
   }
 };
 
@@ -393,7 +392,7 @@ export const deletePeriod = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next);
+    return handleTimetableError(error, next, req);
   }
 };
 /*
@@ -475,7 +474,7 @@ export const createLesson = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next);
+    return handleTimetableError(error, next, req);
   }
 };
 
@@ -595,7 +594,7 @@ export const updateLesson = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next);
+    return handleTimetableError(error, next, req);
   }
 };
 
@@ -626,6 +625,6 @@ export const deleteLesson = async (req, res, next) => {
       data: { deletedLessonId: lesson.id },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "TIMETABLE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

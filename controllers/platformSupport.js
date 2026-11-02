@@ -1,13 +1,6 @@
+import { PlatformUser, SupportConversation, ConversationMessage, School, User } from "../relationships/associations.js";
 import { Op, Transaction } from "sequelize";
-
-import {
-  PlatformUser,
-  SupportConversation,
-  ConversationMessage,
-  School,
-  User,
-} from "../relationships/associations.js";
-
+import { handleControllerError } from "../utils/controllerError.js";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
 
@@ -18,7 +11,9 @@ const LIMIT_DEFAULT = 20;
 const LIMIT_MAX = 100;
 
 const asyncHandler = (handler) => (req, res, next) =>
-  Promise.resolve(handler(req, res, next)).catch(next);
+  Promise.resolve(handler(req, res, next)).catch((error) =>
+    handleControllerError(error, next, req, "PLATFORM_SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.")
+  );
 
 const success = (res, data, statusCode = 200) =>
   res.status(statusCode).json({

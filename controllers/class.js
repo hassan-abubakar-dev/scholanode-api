@@ -1,4 +1,4 @@
-
+import { handleControllerError } from "../utils/controllerError.js";
 import { Class, User, Student } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
@@ -62,7 +62,7 @@ export const getSchoolClasses = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "CLASS_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -241,6 +241,6 @@ export const assignFormMaster = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "CLASS_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

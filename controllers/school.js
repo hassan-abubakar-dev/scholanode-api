@@ -1,17 +1,11 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { School, User, Session, Term, Class, Subject, Owner, VerificationCode } from "../relationships/associations.js";
 /**
  * @file controllers/school.js
  * @description Controller for school registration and management
  */
 
 import bcrypt from 'bcryptjs';
-import School from '../models/School.js';
-import User from '../models/User.js';
-import Session from "../models/Session.js";
-import Term from "../models/Term.js";
-import Class from "../models/Class.js";
-import Subject from "../models/Subject.js";
-import Owner from "../models/Owner.js";
-import VerificationCode from "../models/VerificationCode.js";
 import sendEmail from '../config/emailService.js';
 
 import { Op } from 'sequelize';
@@ -40,15 +34,17 @@ export const checkSchoolCode = async (req, res, next) => {
       available: !school,
     });
   } catch (error) {
-    console.error('Check school code error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Failed to check school code.',
-    });
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "CHECK_SCHOOL_CODE_ERROR",
+      "Failed to check school code."
+    );
   }
 };
 
-export const getSchoolByCode = async (req, res) => {
+export const getSchoolByCode = async (req, res, next) => {
   try {
     const { code } = req.params;
 
@@ -83,12 +79,13 @@ export const getSchoolByCode = async (req, res) => {
       data: school,
     });
   } catch (error) {
-    console.error('Get school by code error:', error);
-
-    return res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch school.',
-    });
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "GET_SCHOOL_BY_CODE_ERROR",
+      "Failed to fetch school."
+    );
   }
 };
 
@@ -745,7 +742,7 @@ export const getSchoolSetupProgress = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SCHOOL_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -788,7 +785,7 @@ export const getMySchool = async (req, res, next) => {
       school,
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "SCHOOL_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 

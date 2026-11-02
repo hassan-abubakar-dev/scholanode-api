@@ -1,14 +1,5 @@
-import {
-  Class,
-  Student,
-  User,
-  Session,
-  Term,
-  WorkingDay,
-  AttendanceRegister,
-  AttendanceRecord,
-} from "../relationships/associations.js";
-
+import { handleControllerError } from "../utils/controllerError.js";
+import { Class, Student, User, Session, Term, WorkingDay, AttendanceRegister, AttendanceRecord } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
 
@@ -194,7 +185,7 @@ export const getTodayAttendance = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "ATTENDANCE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -431,7 +422,7 @@ export const createTodayAttendance = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ATTENDANCE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -691,7 +682,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ATTENDANCE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -983,6 +974,6 @@ export const submitAttendance = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ATTENDANCE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

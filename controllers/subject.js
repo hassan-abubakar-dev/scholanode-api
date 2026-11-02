@@ -1,4 +1,5 @@
-import Subject from "../models/Subject.js";
+import { handleControllerError } from "../utils/controllerError.js";
+import { Subject } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 
 export const getAllSubjects = async (req, res, next) => {
@@ -41,7 +42,7 @@ export const getAllSubjects = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUBJECT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -113,7 +114,7 @@ export const updateSubject = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "SUBJECT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -166,7 +167,7 @@ export const activateSubject = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUBJECT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -219,6 +220,6 @@ export const deactivateSubject = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUBJECT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

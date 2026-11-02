@@ -1,6 +1,6 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { User } from "../relationships/associations.js";
 import { Op } from "sequelize";
-import User from "../models/User.js";
-
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 
@@ -97,7 +97,7 @@ export const getAllStaff = async (req, res, next) => {
       summary,
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -160,7 +160,7 @@ export const deactivateStaff = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -225,7 +225,7 @@ export const activateStaff = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -254,7 +254,7 @@ export const getLeaderStatus = async (req, res, next) => {
       leaderStatus: leader?.status ?? null,
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -333,7 +333,7 @@ export const updateStaff = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -557,7 +557,7 @@ export const resetStaffPassword = async (req, res, next) => {
       error,
     });
 
-    return next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
  
@@ -740,7 +740,7 @@ export const inviteStaff = async (req, res, next) => {
     }
 
     console.error("Invite staff error:", error);
-    return next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -957,7 +957,7 @@ export const importStaffCsv = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 

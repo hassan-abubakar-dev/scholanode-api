@@ -33,6 +33,8 @@ import PlatformContactInquiry from "../models/PlatformContactInquiry.js";
 
 import Notification from "../models/Notification.js";
 import Announcement from "../models/Announcement.js";
+import Payment from "../models/Payment.js";
+import VerificationCode from "../models/VerificationCode.js";
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -790,5 +792,7 @@ TimetablePeriod,
   SchoolInquiry,
   PlatformContactInquiry,
   Notification,
-  Announcement
+  Announcement,
+  Payment,
+  VerificationCode
 };

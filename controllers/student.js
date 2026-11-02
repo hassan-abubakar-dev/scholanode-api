@@ -1,14 +1,8 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { Student, User, Class, ParentStudent } from "../relationships/associations.js";
 import bcrypt from "bcryptjs";
-
 import { dbConnection } from "../config/db.js";
-
 import { Op, fn, col, where as sequelizeWhere } from "sequelize";
-import {
-  Student,
-  User,
-  Class,
-  ParentStudent,
-} from "../relationships/associations.js";
 
 export const createStudent = async (req, res, next) => {
   let transaction;
@@ -151,7 +145,7 @@ export const createStudent = async (req, res, next) => {
       });
     }
 
-    next(error);
+    return handleControllerError(error, next, req, "STUDENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -383,7 +377,7 @@ export const getAllStudents = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "STUDENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -695,6 +689,6 @@ export const importStudents = async (req, res, next) => {
       });
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "STUDENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

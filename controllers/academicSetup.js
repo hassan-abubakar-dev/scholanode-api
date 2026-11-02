@@ -1,11 +1,7 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { Session, Term, Class, Subject, School, WorkingDay } from "../relationships/associations.js";
 import { dbConnection } from "../config/db.js";
-import Session from "../models/Session.js";
-import  Term  from "../models/Term.js";
-import Class from "../models/Class.js";
-import Subject from "../models/Subject.js";
-import School from "../models/School.js";
 import AppError from "../utils/AppError.js";
-import WorkingDay from "../models/WorkingDay.js";
 import { Op } from "sequelize";
 
 
@@ -123,7 +119,7 @@ export const createSessionWithTerms = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -300,7 +296,7 @@ export const createClass = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -409,7 +405,7 @@ export const createSubject = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -486,7 +482,7 @@ export const saveWorkingDays = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -555,6 +551,6 @@ export const getAcademicSetupProgress = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

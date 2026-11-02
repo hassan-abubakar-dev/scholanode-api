@@ -1,3 +1,5 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { User, VerificationCode } from "../relationships/associations.js";
 import bcrypt from "bcryptjs";
 import { Op } from "sequelize";
 
@@ -5,10 +7,6 @@ import AppError from "../utils/AppError.js";
 import sendEmail from "../config/emailService.js";
 import generateVerificationCode from "../utils/verificationCode.js";
 import generateExpiryTime from "../utils/experyTime.js";
-
-import { User } from "../relationships/associations.js";
-import VerificationCode from "../models/VerificationCode.js";
-
 import path from "path";
 
 import {
@@ -90,7 +88,7 @@ export const requestProfileImageUpload = async (req, res, next) => {
             expiresIn: 300,
         });
     } catch (error) {
-        next(error);
+        return handleControllerError(error, next, req, "PROFILE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -198,7 +196,7 @@ export const confirmProfileImageUpload = async (req, res, next) => {
             },
         });
     } catch (error) {
-        next(error);
+        return handleControllerError(error, next, req, "PROFILE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -250,7 +248,7 @@ export const updateProfile = async (req, res, next) => {
             },
         });
     } catch (error) {
-        next(error);
+        return handleControllerError(error, next, req, "PROFILE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -360,7 +358,7 @@ export const requestEmailChange = async (req, res, next) => {
                 "A verification code has been sent to your new email address.",
         });
     } catch (error) {
-        next(error);
+        return handleControllerError(error, next, req, "PROFILE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -456,6 +454,6 @@ export const verifyEmailChange = async (req, res, next) => {
             },
         });
     } catch (error) {
-        next(error);
+        return handleControllerError(error, next, req, "PROFILE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };

@@ -1,6 +1,7 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { Complaint } from "../relationships/associations.js";
 import { Op, fn, col } from "sequelize";
 
-import  Complaint  from "../models/Complaint.js";
 import AppError from "../utils/AppError.js";
 
 // ==========================================
@@ -110,7 +111,7 @@ if (restrictedRoles.includes(req.user.role)) {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "COMPLAINT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -175,7 +176,7 @@ if (restrictedRoles.includes(req.user.role)) {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "COMPLAINT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -294,7 +295,7 @@ export const getSchoolComplaints = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "COMPLAINT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -366,6 +367,6 @@ export const updateComplaintStatus = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "COMPLAINT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

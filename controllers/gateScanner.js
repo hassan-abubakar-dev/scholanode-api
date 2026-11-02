@@ -1,13 +1,6 @@
-
+import { handleControllerError } from "../utils/controllerError.js";
+import { User, Student, Parent, ParentStudent, GateScanner, GateScanRecord, Class } from "../relationships/associations.js";
 import { Op } from "sequelize";
-
-import User from "../models/User.js";
-import Student from "../models/Student.js";
-import Parent from "../models/Parent.js";
-import ParentStudent from "../models/ParentStudent.js";
-import GateScanner from "../models/GateScanner.js";
-import GateScanRecord from "../models/GateScanRecord.js";
-import Class from "../models/Class.js"
 
 import AppError from "../utils/AppError.js";
 
@@ -441,7 +434,7 @@ export const verifyStudent = async (req, res, next) => {
       })),
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -611,7 +604,7 @@ export const recordStudentScan = async (req, res, next) => {
       }
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -682,7 +675,7 @@ export const authorizeStaffScanner = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -727,7 +720,7 @@ export const revokeStaffScanner = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -798,7 +791,7 @@ export const getAuthorizedScanners = async (req, res, next) => {
       scanners,
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -1007,7 +1000,7 @@ export const getScanHistory = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -1072,6 +1065,6 @@ export const getSecurityDashboard = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

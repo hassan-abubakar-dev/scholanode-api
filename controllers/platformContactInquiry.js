@@ -1,10 +1,5 @@
+import { PlatformContactInquiry, PlatformUser } from "../relationships/associations.js";
 import { Op } from "sequelize";
-
-import {
-  PlatformContactInquiry,
-  PlatformUser,
-} from "../relationships/associations.js";
-
 import AppError from "../utils/AppError.js";
 
 const isDev = process.env.NODE_ENV !== "production";

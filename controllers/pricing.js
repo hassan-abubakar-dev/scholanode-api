@@ -1,3 +1,4 @@
+import { handleControllerError } from "../utils/controllerError.js";
 import {
   getPlanPricing,
   resolvePricing,
@@ -18,7 +19,7 @@ export const getPricingByPlan = async (req, res, next) => {
       data: pricing,
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "PRICING_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -47,6 +48,6 @@ export const resolvePricingSelection = async (req, res, next) => {
       data: pricing,
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "PRICING_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

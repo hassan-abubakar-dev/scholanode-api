@@ -1,7 +1,4 @@
-import User from "../models/User.js";
-import VerificationCode from "../models/VerificationCode.js";
-import School from "../models/School.js";
-
+import { User, VerificationCode, School } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import generateToken from "../utils/token.js";
 import { dbConnection } from "../config/db.js";

@@ -1,14 +1,14 @@
+import { Payment, School } from "../relationships/associations.js";
 import axios from "axios";
 import crypto from "crypto";
-import Payment from "../models/Payment.js";
-import School from "../models/School.js";
 import { resolvePricing } from "../services/pricing.js";
+import { handleControllerError } from "../utils/controllerError.js";
 
 // ========================================
 // INITIALIZE PAYMENT
 // ========================================
 
-export const initializePayment = async (req, res) => {
+export const initializePayment = async (req, res, next) => {
   let payment;
 
   try {
@@ -141,11 +141,6 @@ export const initializePayment = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "Initialize payment error:",
-      error.response?.data || error.message
-    );
-
     // ========================================
     // MARK PAYMENT AS FAILED
     // ========================================
@@ -156,10 +151,13 @@ export const initializePayment = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Unable to initialize payment.",
-    });
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "INITIALIZE_PAYMENT_ERROR",
+      "Unable to initialize payment."
+    );
   }
 };
 
@@ -356,7 +354,7 @@ export const handlePaystackWebhook = async (req, res) => {
 // GET PAYMENT STATUS
 // ======================================== 
 
-export const getPaymentStatus = async (req, res) => {
+export const getPaymentStatus = async (req, res, next) => {
   try {
     const { reference } = req.params;
 
@@ -384,14 +382,12 @@ export const getPaymentStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "Get payment status error:",
-      error.message
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "GET_PAYMENT_STATUS_ERROR",
+      "Unable to get payment status."
     );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to get payment status.",
-    });
   }
 };

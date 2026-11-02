@@ -1,11 +1,6 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { Owner, SupportConversation, ConversationMessage } from "../relationships/associations.js";
 import { Op } from "sequelize";
-
-import {
-  Owner,
-  SupportConversation,
-  ConversationMessage,
-} from "../relationships/associations.js";
-
 import { dbConnection } from "../config/db.js";
 
 import AppError from "../utils/AppError.js";
@@ -87,7 +82,7 @@ export const authorizeSupportAccess = async (
 
     return next();
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -173,7 +168,7 @@ export const createConversation = async (
     });
   } catch (error) {
     await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -228,7 +223,7 @@ export const getMyConversations = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -327,7 +322,7 @@ export const getConversationMessages = async (
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -417,7 +412,7 @@ export const sendMessage = async (
     });
   } catch (error) {
     await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -475,6 +470,6 @@ export const reopenConversation = async (
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SUPPORT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

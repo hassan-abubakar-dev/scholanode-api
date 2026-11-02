@@ -1,9 +1,9 @@
-
+import { handleControllerError } from "../utils/controllerError.js";
+import { User } from "../relationships/associations.js";
 import { Op } from "sequelize";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 
-import User from "../models/User.js";
 import { dbConnection } from "../config/db.js";
 import generateSecurityLoginId from "../services/generateSecurityLoginId.js";
 import sendEmail from "../config/emailService.js";
@@ -215,7 +215,7 @@ export const createSecurityPersonnel = async (req, res, next) => {
       }
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "GATESECURITY_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -263,7 +263,7 @@ export const getSecurityPersonnel = async (req, res, next) => {
       summary,
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESECURITY_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -347,7 +347,7 @@ export const updateSecurityPersonnel = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESECURITY_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -400,7 +400,7 @@ export const deactivateSecurityPersonnel = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESECURITY_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -462,7 +462,7 @@ export const activateSecurityPersonnel = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "GATESECURITY_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
  

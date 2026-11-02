@@ -1,26 +1,8 @@
-import { randomBytes } from "node:crypto";
-import bcrypt from "bcryptjs";
-
-import { dbConnection } from "../config/db.js";
-
+import { handleControllerError } from "../utils/controllerError.js";
+import { School, User, Parent, ParentStudent, Student, Class, Session, Term, AttendanceRegister, AttendanceRecord, VerificationCode } from "../relationships/associations.js";
 import { Op } from "sequelize";
-
-import {
-  School,
-  User,
-  Parent,
-  ParentStudent,
-  Student,
-  Class,
-  Session,
-  Term,
-  AttendanceRegister,
-  AttendanceRecord,
-} from "../relationships/associations.js";
-
 import AppError from '../utils/AppError.js';
 import sendEmail from '../config/emailService.js';
-import VerificationCode from "../models/VerificationCode.js";
 import generateVerificationCode from "../utils/verificationCode.js";
 import generateExpiryTime from "../utils/experyTime.js";
 
@@ -739,7 +721,7 @@ export const importParents = async (req, res, next) => {
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -1384,10 +1366,10 @@ export const deleteParent = async (req, res, next) => {
     });
   } catch (error) {
     if (error instanceof AppError) {
-      return next(error);
+      return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -1785,7 +1767,7 @@ export const requestChildEmailChange = async (req, res, next) => {
       message: "A verification code has been sent to the new email address.",
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -1895,6 +1877,6 @@ export const verifyChildEmailChange = async (req, res, next) => {
       await transaction.rollback();
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

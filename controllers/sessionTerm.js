@@ -1,3 +1,4 @@
+import { handleControllerError } from "../utils/controllerError.js";
 import { Session, Term } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 
@@ -41,7 +42,7 @@ order: [
       },
     });
   } catch (error) {
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -217,7 +218,7 @@ export const updateSessionWithTerms = async (req, res, next) => {
       );
     }
 
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -296,7 +297,7 @@ const sessions = await Session.findAll({
     });
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -367,7 +368,7 @@ export const completeSession = async (req, res, next) => {
     });
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -453,7 +454,7 @@ export const activateTerm = async (req, res, next) => {
     });
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
 
@@ -520,6 +521,6 @@ export const completeTerm = async (req, res, next) => {
     });
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
-    return next(error);
+    return handleControllerError(error, next, req, "SESSIONTERM_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };

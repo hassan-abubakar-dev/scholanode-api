@@ -1,7 +1,6 @@
+import { School, SchoolInquiry } from "../relationships/associations.js";
 import { Op } from "sequelize";
 
-import School from "../models/School.js";
-import SchoolInquiry from "../models/SchoolInquiry.js";
 import AppError from "../utils/AppError.js";
 
 const isDev = process.env.NODE_ENV !== "production";

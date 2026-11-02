@@ -1,8 +1,6 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { Announcement, Notification } from "../relationships/associations.js";
 import { Op } from "sequelize";
-import {
-    Announcement,
-    Notification,
-} from "../relationships/associations.js";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
 
@@ -146,7 +144,7 @@ export const createAnnouncement = async (req, res, next) => {
             await transaction.rollback();
         }
 
-        return next(error);
+        return handleControllerError(error, next, req, "ANNOUNCEMENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -187,7 +185,7 @@ export const getAnnouncements = async (req, res, next) => {
             data: result,
         });
     } catch (error) {
-        return next(error);
+        return handleControllerError(error, next, req, "ANNOUNCEMENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -233,7 +231,7 @@ export const getMyAnnouncements = async (req, res, next) => {
             data: result,
         });
     } catch (error) {
-        return next(error);
+        return handleControllerError(error, next, req, "ANNOUNCEMENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };
 
@@ -298,6 +296,6 @@ export const deleteAnnouncement = async (req, res, next) => {
             await transaction.rollback();
         }
 
-        return next(error);
+        return handleControllerError(error, next, req, "ANNOUNCEMENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
     }
 };

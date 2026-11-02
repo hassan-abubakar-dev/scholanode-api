@@ -1,3 +1,5 @@
+import { handleControllerError } from "../utils/controllerError.js";
+import { User, School, Owner, Student, Class, VerificationCode } from "../relationships/associations.js";
 /**
  * @file controllers/auths.js
  * @description Controller for authentication-related operations.
@@ -16,8 +18,6 @@ import generateToken from '../utils/token.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 import generateExpiryTime from '../utils/experyTime.js';
 
-import { User, School, Owner, Student, Class } from "../relationships/associations.js";
-import VerificationCode from '../models/VerificationCode.js';
 import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 
 
@@ -1132,6 +1132,6 @@ export const changePassword = async (req, res, next) => {
       error,
     });
 
-    return next(error);
+    return handleControllerError(error, next, req, "AUTH_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
