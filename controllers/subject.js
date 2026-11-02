@@ -1,7 +1,8 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Subject } from "../relationships/associations.js";
+import { School, Subject } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import { Op, col, fn, where as sequelizeWhere } from "sequelize";
+import { dbConnection } from "../config/db.js";
 
 export const getAllSubjects = async (req, res, next) => {
   try {
@@ -49,6 +50,8 @@ export const getAllSubjects = async (req, res, next) => {
 
 
 export const updateSubject = async (req, res, next) => {
+  let transaction;
+
   try {
     // 1. Get authenticated school
     const schoolId = req.user?.schoolId;
@@ -63,18 +66,29 @@ export const updateSubject = async (req, res, next) => {
     const { subjectId } = req.params;
     const { subjectName } = req.body;
 
+    transaction = await dbConnection.transaction();
+
+    const school = await School.findByPk(schoolId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!school) {
+      throw new AppError("Authenticated school not found.", 404);
+    }
+
     // 3. Find subject belonging to this school
     const subject = await Subject.findOne({
       where: {
         id: subjectId,
         schoolId,
       },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!subject) {
-      return next(
-        new AppError("Subject not found for this school.", 404)
-      );
+      throw new AppError("Subject not found for this school.", 404);
     }
 
     // 4. Check for duplicate subject name
@@ -88,19 +102,23 @@ export const updateSubject = async (req, res, next) => {
           ),
         ],
       },
+      transaction,
     });
 
     if (existingSubject && existingSubject.id !== subject.id) {
-      return next(
-        new AppError(
-          "This subject already exists for this school.",
-          409
-        )
+      throw new AppError(
+        "This subject already exists for this school.",
+        409
       );
     }
 
     // 5. Update subject
-    await subject.update({ subjectName });
+    await subject.update(
+      { subjectName: subjectName.trim() },
+      { transaction }
+    );
+
+    await transaction.commit();
 
     // 6. Return updated subject
     return res.status(200).json({
@@ -111,6 +129,10 @@ export const updateSubject = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     if (error.name === "SequelizeUniqueConstraintError") {
       return next(
         new AppError(

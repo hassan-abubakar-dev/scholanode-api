@@ -57,10 +57,11 @@ router.get(
   getSchoolByCode
 );
 
-// Get the logged-in user's school
+// administratives get school for school profile rendering
 router.get(
   "/my-school",
   protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   getMySchool
 );
 

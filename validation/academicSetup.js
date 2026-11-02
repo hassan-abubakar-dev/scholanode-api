@@ -57,6 +57,28 @@ export const createSessionWithTermsSchema = Joi.object({
     }),
 }).required();
 
+export const saveWorkingDaysSchema = Joi.object({
+  days: Joi.array()
+    .items(
+      Joi.string()
+        .trim()
+        .uppercase()
+        .valid(
+          "MONDAY",
+          "TUESDAY",
+          "WEDNESDAY",
+          "THURSDAY",
+          "FRIDAY",
+          "SATURDAY",
+          "SUNDAY"
+        )
+    )
+    .min(1)
+    .max(7)
+    .unique()
+    .required(),
+}).required();
+
 const classItemSchema = Joi.object({
   classLevel: Joi.string()
     .trim()

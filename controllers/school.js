@@ -712,6 +712,7 @@ export const getSchoolSetupProgress = async (req, res, next) => {
 
 
 // Get the authenticated user's school
+// Get the authenticated user's school
 export const getMySchool = async (req, res, next) => {
   try {
     // schoolId comes from the authenticated user's JWT/payload
@@ -756,11 +757,31 @@ export const getMySchool = async (req, res, next) => {
     const schoolData = school.toJSON();
     delete schoolData.logoKey;
 
+    const logoUrl = getPublicFileUrl(school.logoKey);
+
+    const steps = {
+      supportEmail: Boolean(school.supportEmail?.trim()),
+      supportPhone: Boolean(school.supportPhone?.trim()),
+      logo: Boolean(school.logoKey?.trim()),
+      welcomeMessage: Boolean(school.welcomeMessage?.trim()),
+    };
+
+    const totalSteps = Object.keys(steps).length;
+    const completedSteps = Object.values(steps).filter(Boolean).length;
+    const percentage = Math.round((completedSteps / totalSteps) * 100);
+
     return res.status(200).json({
       success: true,
       school: {
         ...schoolData,
-        logoUrl: getPublicFileUrl(school.logoKey),
+        logoUrl,
+      },
+      setupProgress: {
+        percentage,
+        completed: completedSteps === totalSteps,
+        completedSteps,
+        totalSteps,
+        steps,
       },
     });
   } catch (error) {

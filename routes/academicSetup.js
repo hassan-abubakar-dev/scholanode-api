@@ -12,6 +12,7 @@ import {
   createSessionWithTermsSchema,
   createClassSchema,
   createSubjectSchema,
+  saveWorkingDaysSchema,
 } from "../validation/academicSetup.js";
 
 const router = express.Router();
@@ -48,8 +49,9 @@ router.post(
   "/working-days",
   protectRoutes,
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  validate(saveWorkingDaysSchema, "body"),
   saveWorkingDays
-);  
+);
 
 router.get(
   "/progress",

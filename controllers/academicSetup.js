@@ -2,15 +2,17 @@ import { handleControllerError } from "../utils/controllerError.js";
 import { Session, Term, Class, Subject, School, WorkingDay } from "../relationships/associations.js";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
-import { Op } from "sequelize";
+import { Op, col, fn, where as sequelizeWhere } from "sequelize";
 
 
 
 
 export const createSessionWithTerms = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
 
   try {
+    transaction = await dbConnection.transaction();
+
     // 1. Get authenticated school
     const schoolId = req.user?.schoolId;
 
@@ -27,8 +29,37 @@ export const createSessionWithTerms = async (req, res, next) => {
     const sessionStartDate = new Date(session.startDate);
     const sessionEndDate = new Date(session.endDate);
 
-    // Validate that each term date range falls within the session dates
-    for (const term of terms) {
+    const normalizedTerms = terms.map((term) => ({
+      ...term,
+      termName: term.termName.trim().toUpperCase(),
+    }));
+    const termNames = normalizedTerms.map((term) => term.termName);
+
+    if (
+      new Set(termNames).size !== 3 ||
+      !["FIRST_TERM", "SECOND_TERM", "THIRD_TERM"].every((termName) =>
+        termNames.includes(termName)
+      )
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError(
+          "Exactly one FIRST_TERM, SECOND_TERM, and THIRD_TERM is required.",
+          400
+        )
+      );
+    }
+
+    const termsByName = Object.fromEntries(
+      normalizedTerms.map((term) => [term.termName, term])
+    );
+    const orderedTerms = [
+      termsByName.FIRST_TERM,
+      termsByName.SECOND_TERM,
+      termsByName.THIRD_TERM,
+    ];
+
+    for (const term of orderedTerms) {
       const termStartDate = new Date(term.startDate);
       const termEndDate = new Date(term.endDate);
 
@@ -46,11 +77,53 @@ export const createSessionWithTerms = async (req, res, next) => {
       }
     }
 
+    if (
+      new Date(orderedTerms[0].startDate) >=
+        new Date(orderedTerms[1].startDate) ||
+      new Date(orderedTerms[1].startDate) >=
+        new Date(orderedTerms[2].startDate)
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError(
+          "FIRST_TERM, SECOND_TERM, and THIRD_TERM must occur in chronological order.",
+          400
+        )
+      );
+    }
+
+    if (
+      new Date(orderedTerms[0].endDate) >=
+        new Date(orderedTerms[1].startDate) ||
+      new Date(orderedTerms[1].endDate) >=
+        new Date(orderedTerms[2].startDate)
+    ) {
+      await transaction.rollback();
+      return next(
+        new AppError("Academic terms must not overlap.", 400)
+      );
+    }
+
+    const school = await School.findByPk(schoolId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!school) {
+      await transaction.rollback();
+      return next(new AppError("Authenticated school not found.", 404));
+    }
+
     // 7. Check for duplicate session
     const existingSession = await Session.findOne({
       where: {
         schoolId,
-        sessionName: session.sessionName.trim(),
+        [Op.and]: [
+          sequelizeWhere(
+            fn("LOWER", col("sessionName")),
+            session.sessionName.trim().toLowerCase()
+          ),
+        ],
       },
       transaction,
     });
@@ -80,7 +153,7 @@ export const createSessionWithTerms = async (req, res, next) => {
 
     // 9. Create all three terms
     const newTerms = await Term.bulkCreate(
-      terms.map((term) => ({
+      normalizedTerms.map((term) => ({
         sessionId: newSession.id,
         termName: term.termName,
         startDate: new Date(term.startDate),
@@ -105,7 +178,7 @@ export const createSessionWithTerms = async (req, res, next) => {
     });
   } catch (error) {
     // Rollback if transaction is still active
-    if (!transaction.finished) {
+    if (transaction && !transaction.finished) {
       await transaction.rollback();
     }
 
@@ -325,7 +398,7 @@ export const createSubject = async (req, res, next) => {
 
     // 4. Reject duplicate names within the submitted batch
     const submittedNames = normalizedSubjects.map(({ subjectName }) =>
-      subjectName.toLocaleLowerCase()
+      subjectName.toLowerCase()
     );
 
     if (new Set(submittedNames).size !== submittedNames.length) {
@@ -358,12 +431,12 @@ export const createSubject = async (req, res, next) => {
 
     const existingNames = new Set(
       existingSubjects.map((subject) =>
-        subject.subjectName.trim().toLocaleLowerCase()
+        subject.subjectName.trim().toLowerCase()
       )
     );
 
     const duplicateSubject = normalizedSubjects.find(({ subjectName }) =>
-      existingNames.has(subjectName.toLocaleLowerCase())
+      existingNames.has(subjectName.toLowerCase())
     );
 
     if (duplicateSubject) {
@@ -506,12 +579,58 @@ export const getAcademicSetupProgress = async (req, res, next) => {
       );
     }
 
-    // 2. Check Sessions & Terms
-    const sessionCount = await Session.count({
+    // 2. Check for at least one fully configured three-term session.
+    const sessions = await Session.findAll({
       where: { schoolId },
+      attributes: ["id", "startDate", "endDate"],
+      include: [
+        {
+          model: Term,
+          as: "terms",
+          attributes: ["termName", "startDate", "endDate"],
+          required: true,
+        },
+      ],
     });
 
-    const sessionsAndTermsCompleted = sessionCount > 0;
+    const sessionsAndTermsCompleted = sessions.some((session) => {
+      const termsByName = Object.fromEntries(
+        session.terms.map((term) => [term.termName, term])
+      );
+      const orderedTerms = [
+        termsByName.FIRST_TERM,
+        termsByName.SECOND_TERM,
+        termsByName.THIRD_TERM,
+      ];
+
+      if (
+        orderedTerms.some((term) => !term) ||
+        session.terms.length !== 3
+      ) {
+        return false;
+      }
+
+      for (const term of orderedTerms) {
+        if (
+          new Date(term.startDate) < new Date(session.startDate) ||
+          new Date(term.endDate) > new Date(session.endDate) ||
+          new Date(term.endDate) <= new Date(term.startDate)
+        ) {
+          return false;
+        }
+      }
+
+      return (
+        new Date(orderedTerms[0].startDate) <
+          new Date(orderedTerms[1].startDate) &&
+        new Date(orderedTerms[1].startDate) <
+          new Date(orderedTerms[2].startDate) &&
+        new Date(orderedTerms[0].endDate) <
+          new Date(orderedTerms[1].startDate) &&
+        new Date(orderedTerms[1].endDate) <
+          new Date(orderedTerms[2].startDate)
+      );
+    });
 
     // 3. Check Classes & Arms
     const classCount = await Class.count({
