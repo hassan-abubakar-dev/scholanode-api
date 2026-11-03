@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { User, Student, Parent, ParentStudent, GateScanner, GateScanRecord, Class } from "../relationships/associations.js";
+import { User, Student, Parent, ParentStudent, GateScanner, GateScanRecord, Class, Notification } from "../relationships/associations.js";
 import { Op } from "sequelize";
 
 import AppError from "../utils/AppError.js";
@@ -7,6 +7,7 @@ import AppError from "../utils/AppError.js";
 import { dbConnection } from "../config/db.js";
 import { likeCondition } from "../utils/dbHelper.js";
 import { getPrivateFileUrl } from "../services/storage/r2.service.js";
+import { emitNotificationCount } from "../utils/notificationSocket.js";
 
 
 // Staff roles that may scan when explicitly authorized.
@@ -155,6 +156,139 @@ const getSchoolDayRange = (
   );
 
   return { start, end };
+};
+
+// Format a scan timestamp for parent-facing notifications.
+const formatScanTime = (value) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: SCHOOL_TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(value));
+
+// Notify the parents of every student whose gate scan was recorded.
+// Runs after the scan transaction commits so failed scans never notify.
+const notifyParentsOfRecordedScans = async ({
+  schoolId,
+  scanType,
+  records,
+}) => {
+  if (!records?.length) return;
+
+  const studentIds = [
+    ...new Set(records.map((record) => record.studentId)),
+  ];
+
+  const [students, parentLinks] = await Promise.all([
+    Student.findAll({
+      where: { schoolId, id: { [Op.in]: studentIds } },
+      attributes: ["id"],
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["firstName", "surName"],
+          required: true,
+          where: { schoolId },
+        },
+      ],
+    }),
+    ParentStudent.findAll({
+      where: {
+        schoolId,
+        studentId: { [Op.in]: studentIds },
+        receivesNotifications: true,
+      },
+      attributes: ["studentId"],
+      include: [
+        {
+          model: Parent,
+          as: "parent",
+          attributes: ["userId"],
+          required: true,
+          where: { schoolId, status: "ACTIVE" },
+        },
+      ],
+    }),
+  ]);
+
+  const studentNames = new Map(
+    students.map((student) => [
+      student.id,
+      [student.user?.firstName, student.user?.surName]
+        .filter(Boolean)
+        .join(" "),
+    ])
+  );
+
+  // A parent may have several children in the same batch; each child
+  // gets its own notification.
+  const parentUserIdsByStudent = new Map();
+
+  for (const link of parentLinks) {
+    const parentUserId = link.parent?.userId;
+
+    if (!parentUserId) continue;
+
+    if (!parentUserIdsByStudent.has(link.studentId)) {
+      parentUserIdsByStudent.set(link.studentId, new Set());
+    }
+
+    parentUserIdsByStudent.get(link.studentId).add(parentUserId);
+  }
+
+  const isArrival = scanType === "ARRIVAL";
+  const notifications = [];
+
+  for (const record of records) {
+    const studentName = studentNames.get(record.studentId);
+    const recipientUserIds = parentUserIdsByStudent.get(
+      record.studentId
+    );
+
+    if (!studentName || !recipientUserIds?.size) continue;
+
+    // MySQL does not return database-generated timestamps on bulk insert.
+    const scannedAtValue = record.scannedAt ?? new Date();
+    const scannedAt = formatScanTime(scannedAtValue);
+
+    for (const recipientUserId of recipientUserIds) {
+      notifications.push({
+        schoolId,
+        deliveryType: "INDIVIDUAL",
+        recipientUserId,
+        type: isArrival ? "GATE_ARRIVAL" : "GATE_RETURN",
+        title: isArrival ? "Arrival recorded" : "Return recorded",
+        message: isArrival
+          ? `${studentName} was recorded arriving at school at ${scannedAt}.`
+          : `${studentName} was recorded leaving school at ${scannedAt}.`,
+        referenceId: record.id,
+        metadata: {
+          studentId: record.studentId,
+          scanType,
+          scannedAt: scannedAtValue,
+          recordedByUserId: record.scannedByUserId,
+        },
+      });
+    }
+  }
+
+  if (notifications.length === 0) return;
+
+  await Notification.bulkCreate(notifications, { validate: true });
+
+  const recipientUserIds = [
+    ...new Set(
+      notifications.map(
+        (notification) => notification.recipientUserId
+      )
+    ),
+  ];
+
+  await Promise.all(
+    recipientUserIds.map((userId) => emitNotificationCount(userId))
+  );
 };
 
 // Verify a student using either QR token or admission number.
@@ -579,6 +713,20 @@ export const recordStudentScan = async (req, res, next) => {
 
     await transaction.commit();
     transaction = null;
+
+    // Notifications must never fail a scan that was already recorded.
+    try {
+      await notifyParentsOfRecordedScans({
+        schoolId,
+        scanType,
+        records: scanRecords,
+      });
+    } catch (notificationError) {
+      console.error(
+        "GATE_SCAN_NOTIFICATION_ERROR:",
+        notificationError
+      );
+    }
 
     return res.status(201).json({
       success: true,
