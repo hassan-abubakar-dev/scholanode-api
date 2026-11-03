@@ -838,7 +838,7 @@ export const importStaffCsv = async (req, res, next) => {
               passwordHash,
               status: "ACTIVE",
               mustChangePassword: true,
-              profileCompleted: false,
+              profileCompleted: true,
             },
             { transaction }
           );
@@ -940,7 +940,7 @@ export const importStaffCsv = async (req, res, next) => {
           loginId: staffMember.loginId,
           status: "ACTIVE",
           mustChangePassword: true,
-          profileCompleted: false,
+          profileCompleted: true,
         })),
       },
     });
