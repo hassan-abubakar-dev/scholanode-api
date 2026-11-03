@@ -5,6 +5,9 @@ import cookieParser from "cookie-parser";
 import { dbConnection, testConnection } from './config/db.js';
 import "./relationships/associations.js";
 import errorHandler from './middleware/errorHandler.js';
+// socket.io routes
+import { createServer } from "http";
+import { initializeSocket } from "./config/socket.js";
 
 // paystack webhook
 import { handlePaystackWebhook } from './controllers/payment.js';
@@ -33,6 +36,7 @@ import schoolInquiryRouter from "./routes/schoolInquiry.js";
 import platformContactInquiryRouter from "./routes/platformContactInquiry.js";
 import profileRouter from "./routes/profile.js";
 import announcementRouter from "./routes/announcement.js"
+import notificationRouter from "./routes/notification.js";
 
 
 
@@ -40,6 +44,7 @@ import announcementRouter from "./routes/announcement.js"
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 
 // Comma-separated list of exact browser origins allowed in production.
 // Example: CLIENT_ORIGINS=https://app.scholanode.com,https://admin.scholanode.com
@@ -141,7 +146,7 @@ app.use("/api/school-inquiries", schoolInquiryRouter);
 app.use("/api/platform-contact-inquiries", platformContactInquiryRouter);
 app.use("/api/profiles", profileRouter)
 app.use("/api/announcements", announcementRouter);
-
+app.use("/api/notifications", notificationRouter);
 
 // error handle
 app.use(errorHandler);
@@ -160,9 +165,12 @@ const PORT = process.env.PORT || 5000;
 
         console.log("Database connected and models synced successfully.");
 
-        app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
-        });
+       initializeSocket(httpServer);
+
+httpServer.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log("Socket.IO is ready.");
+});
     } catch (err) {
         console.error("\n❌ Failed to start server");
         console.error("Error name:", err.name);

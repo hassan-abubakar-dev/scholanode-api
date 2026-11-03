@@ -43,6 +43,7 @@ export const protectRoutes = async (req, res, next) => {
             schoolId: currentUser.schoolId,
             loginId: currentUser.loginId,
             role: currentUser.role,
+            lastNotificationCheck: currentUser.lastNotificationCheck,
         };
 
         next();

@@ -118,6 +118,12 @@ role: {
       type: DataTypes.DATE,
       allowNull: true,
     },
+
+    lastNotificationCheck: {
+  type: DataTypes.DATE,
+  allowNull: true,
+  defaultValue: null,
+},
   },
   {
     tableName: "Users",
