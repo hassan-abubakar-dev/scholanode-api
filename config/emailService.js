@@ -9,6 +9,8 @@ const brevo = new BrevoClient({
   maxRetries: 3,
 });
 
+const isDev = process.env.NODE_ENV === "development";
+
 const sendEmail = async ({ to, subject, html }) => {
   try {
     if (!process.env.BREVO_API_KEY) {
@@ -35,7 +37,9 @@ const sendEmail = async ({ to, subject, html }) => {
         to: [{ email: to }],
       });
 
-    console.log("Email sent successfully. Message ID:", result.messageId);
+    if(isDev) {
+      console.log("Email sent successfully. Message ID:", result.messageId);
+    };
 
     return result;
   } catch (error) {
