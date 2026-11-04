@@ -13,6 +13,10 @@ import { parse } from "csv-parse/sync";
 import AppError from "../utils/AppError.js";
 import { staffCsvRowSchema } from "../validation/staff.js";
 import { getPrivateFileUrl } from "../services/storage/r2.service.js";
+import {
+  PENDING_PROFILE_NAMES,
+  hasPendingProfile,
+} from "../utils/pendingProfile.js";
 
 
 const escapeHtml = (value) =>
@@ -46,17 +50,6 @@ const ADMINISTRATIVE_ROLES = [
   "VICE_LEADER",
   "ADMINISTRATOR",
 ];
-
-// Staff invitations are created with these placeholder names until the
-// invited person completes their profile with their real name.
-const PENDING_PROFILE_NAMES = {
-  firstName: "firstName",
-  surName: "surName",
-};
-
-const hasPendingProfile = (user) =>
-  user.firstName === PENDING_PROFILE_NAMES.firstName &&
-  user.surName === PENDING_PROFILE_NAMES.surName;
 
 const requireStaffManagementAccess = async (
   req,

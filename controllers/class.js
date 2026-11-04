@@ -3,6 +3,7 @@ import { Class, User, Student } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
 import { Op } from "sequelize";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
 
 // Get all classes belonging to the authenticated school
 export const getSchoolClasses = async (req, res, next) => {
@@ -41,6 +42,7 @@ export const getSchoolClasses = async (req, res, next) => {
       "loginId",
       "firstName",
       "surName",
+      "email",
       "role",
     ],
     required: false,
@@ -58,7 +60,16 @@ export const getSchoolClasses = async (req, res, next) => {
       message: "Classes retrieved successfully.",
       count: classes.length,
       data: {
-        classes,
+        classes: classes.map((record) => {
+          const classItem = record.toJSON();
+
+          return classItem.formMaster
+            ? {
+                ...classItem,
+                formMaster: serializeStaffProfile(classItem.formMaster),
+              }
+            : classItem;
+        }),
       },
     });
   } catch (error) {
@@ -221,6 +232,7 @@ export const assignFormMaster = async (req, res, next) => {
                 "id",
                 "firstName",
                 "surName",
+                "email",
                 "loginId",
               ],
               required: false,
@@ -231,13 +243,19 @@ export const assignFormMaster = async (req, res, next) => {
       }
     );
 
+    const classPayload = updatedClass.toJSON();
+
+    if (classPayload.formMaster) {
+      classPayload.formMaster = serializeStaffProfile(classPayload.formMaster);
+    }
+
     return res.status(200).json({
       success: true,
       message: updatedClass.formMaster
         ? "Form master assigned successfully."
         : "Form master assignment removed successfully.",
       data: {
-        class: updatedClass,
+        class: classPayload,
       },
     });
   } catch (error) {
