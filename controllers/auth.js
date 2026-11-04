@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { User, School, Owner, Student, Class, VerificationCode } from "../relationships/associations.js";
+import { User, School, Owner, Student, Class, VerificationCode, GateScanner } from "../relationships/associations.js";
 /**
  * @file controllers/auths.js
  * @description Controller for authentication-related operations.
@@ -27,6 +27,15 @@ import {
 dotenv.config();
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// Staff roles that may scan only after an active GateScanner permission exists.
+const STAFF_SCANNER_ROLES = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+  "EXAM_OFFICER",
+  "STAFF",
+];
 
 export const loginUser = async (req, res, next) => {
   try {
@@ -336,6 +345,23 @@ export const getLoggedInUser = async (req, res, next) => {
       }
     }
 
+    // Security users scan directly; other staff need an active
+    // GateScanner permission granted by management.
+    let canScanStudents = user.role === "SECURITY";
+
+    if (!canScanStudents && STAFF_SCANNER_ROLES.includes(user.role)) {
+      const scannerPermission = await GateScanner.findOne({
+        where: {
+          schoolId: user.schoolId,
+          userId: user.id,
+          isActive: true,
+        },
+        attributes: ["id"],
+      });
+
+      canScanStudents = Boolean(scannerPermission);
+    }
+
     // Retrieve school information.
     const school = await School.findByPk(user.schoolId);
     const profileImageUrl = user.profileImageKey
@@ -356,6 +382,7 @@ export const getLoggedInUser = async (req, res, next) => {
       isOwner,
       isFormMaster,
       formClass,
+      canScanStudents,
       createdAt: user.createdAt,
     };
 
