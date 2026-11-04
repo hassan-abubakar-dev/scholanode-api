@@ -6,9 +6,23 @@ import sendEmail from '../config/emailService.js';
 import generateVerificationCode from "../utils/verificationCode.js";
 import generateExpiryTime from "../utils/experyTime.js";
 import { likeCondition } from "../utils/dbHelper.js";
-import { getPrivateFileUrl } from "../services/storage/r2.service.js";
+import path from "path";
+import {
+  getPrivateFileUrl,
+  uploadPrivateFile,
+  getPrivateFileMetadata,
+  deletePrivateFile,
+} from "../services/storage/r2.service.js";
 
 const isDev = process.env.NODE_ENV === "development";
+
+const MAX_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
+
+const ALLOWED_PROFILE_IMAGE_TYPES = {
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/webp": [".webp"],
+};
 
 
 // Also import sendEmail, AppError, and isDev from
@@ -1160,7 +1174,7 @@ export const linkParentToStudent = async (req, res, next) => {
     );
   }
 };
-
+ 
 
 export const unlinkParentFromStudent = async (req, res, next) => {
   let transaction;
@@ -1459,7 +1473,12 @@ export const getParentDashboard = async (req, res, next) => {
             {
               model: User,
               as: "user",
-              attributes: ["firstName", "surName", "email"],
+              attributes: [
+                "firstName",
+                "surName",
+                "email",
+                "profileImageKey",
+              ],
               required: true,
               where: { schoolId },
             },
@@ -1583,10 +1602,12 @@ export const getParentDashboard = async (req, res, next) => {
     }
 
     // 8. Build the dashboard response.
-    const children = relationships.map((relationship) => {
+    const children = [];
+
+    for (const relationship of relationships) {
       const student = relationship.student;
 
-      return {
+      children.push({
         id: student.id,
         firstName: student.user.firstName,
         surName: student.user.surName,
@@ -1594,6 +1615,10 @@ export const getParentDashboard = async (req, res, next) => {
         email: student.user.email,
         qrToken: student.qrToken,
         admissionStatus: student.admissionStatus,
+
+        profileImageUrl: student.user.profileImageKey
+          ? await getPrivateFileUrl(student.user.profileImageKey)
+          : null,
 
         class: student.currentClass
           ? {
@@ -1608,8 +1633,8 @@ export const getParentDashboard = async (req, res, next) => {
           relationship.receivesNotifications,
 
         attendance: attendanceByStudent.get(student.id),
-      };
-    });
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1658,6 +1683,171 @@ export const getParentDashboard = async (req, res, next) => {
   }
 };
 
+
+// ======================================================
+// REQUEST LINKED CHILD'S PROFILE IMAGE UPLOAD URL
+// POST /parents/children/:studentId/image/upload-url
+// ======================================================
+
+export const requestChildProfileImageUpload = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { fileName, contentType, fileSize } = req.body;
+
+    const schoolId = req.user?.schoolId;
+    const parentUserId = req.user?.id;
+
+    if (!schoolId || !parentUserId) {
+      throw new AppError("Authentication is required.", 401);
+    }
+
+    // The upload lands in the child's own storage folder, so the
+    // parent-child link has to hold before we hand out a link.
+    const { childUser } = await getParentAndLinkedChild({
+      parentUserId,
+      schoolId,
+      studentId,
+    });
+
+    const extension = path.extname(fileName).toLowerCase();
+
+    const allowedExtensions = ALLOWED_PROFILE_IMAGE_TYPES[contentType];
+
+    if (!allowedExtensions || !allowedExtensions.includes(extension)) {
+      throw new AppError(
+        "Only JPEG, PNG and WebP profile images are allowed.",
+        400
+      );
+    }
+
+    if (fileSize > MAX_PROFILE_IMAGE_SIZE) {
+      throw new AppError("Profile image must not exceed 5MB.", 400);
+    }
+
+    const { uploadUrl, key } = await uploadPrivateFile({
+      folder: `profiles/users/${childUser.id}`,
+      originalName: fileName,
+      contentType,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile image upload link ready.",
+      uploadUrl,
+      key,
+      expiresIn: 300,
+    });
+  } catch (error) {
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+// ======================================================
+// CONFIRM LINKED CHILD'S PROFILE IMAGE UPLOAD
+// PATCH /parents/children/:studentId/image/confirm
+// ======================================================
+
+export const confirmChildProfileImageUpload = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { key } = req.body;
+
+    const schoolId = req.user?.schoolId;
+    const parentUserId = req.user?.id;
+
+    if (!schoolId || !parentUserId) {
+      throw new AppError("Authentication is required.", 401);
+    }
+
+    // Recheck the link at confirmation time: it may have been removed by
+    // the school after the upload link was issued.
+    const { childUser } = await getParentAndLinkedChild({
+      parentUserId,
+      schoolId,
+      studentId,
+    });
+
+    // Only a key issued for this exact child may be confirmed.
+    const expectedPrefix = `profiles/users/${childUser.id}/`;
+
+    if (
+      !key.startsWith(expectedPrefix) ||
+      key.includes("..") ||
+      key.includes("\\")
+    ) {
+      throw new AppError("Invalid profile image reference.", 400);
+    }
+
+    let metadata;
+
+    try {
+      metadata = await getPrivateFileMetadata(key);
+    } catch (error) {
+      if (
+        error.name === "NotFound" ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        throw new AppError("Uploaded profile image was not found.", 400);
+      }
+
+      throw error;
+    }
+
+    if (
+      !Object.keys(ALLOWED_PROFILE_IMAGE_TYPES).includes(
+        metadata.contentType
+      )
+    ) {
+      await deletePrivateFile(key).catch(() => {});
+
+      throw new AppError("Invalid profile image format.", 400);
+    }
+
+    if (
+      !metadata.contentLength ||
+      metadata.contentLength > MAX_PROFILE_IMAGE_SIZE
+    ) {
+      await deletePrivateFile(key).catch(() => {});
+
+      throw new AppError("Profile image must not exceed 5MB.", 400);
+    }
+
+    const oldImageKey = childUser.profileImageKey;
+
+    // Save the new image reference first.
+    await childUser.update({
+      profileImageKey: key,
+    });
+
+    // Delete the previous image only after a successful database update.
+    if (oldImageKey && oldImageKey !== key) {
+      try {
+        await deletePrivateFile(oldImageKey);
+      } catch (deleteError) {
+        // Keep the new profile image even if old-file cleanup fails.
+        console.error(
+          "Failed to delete previous child profile image:",
+          deleteError
+        );
+      }
+    }
+
+    // Generate a fresh signed URL for immediate frontend display.
+    const profileImageUrl = await getPrivateFileUrl(key);
+
+    return res.status(200).json({
+      success: true,
+      message: "Your child's profile image has been updated.",
+      data: {
+        studentId,
+        profileImageKey: key,
+        profileImageUrl,
+      },
+    });
+  } catch (error) {
+    return handleControllerError(error, next, req, "PARENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
 
 export const requestChildEmailChange = async (req, res, next) => {
   try {

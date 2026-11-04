@@ -221,9 +221,39 @@ export const importParentsSchema = Joi.object({
   .required()
   .unknown(false);
 
-  export const childEmailChangeParamsSchema = Joi.object({
+  export const childStudentParamsSchema = Joi.object({
   studentId: Joi.string().uuid().required(),
 }).unknown(false);
+
+export const requestChildImageUploadUrlSchema = Joi.object({
+  fileName: Joi.string()
+    .trim()
+    .min(1)
+    .max(255)
+    .pattern(/^[a-zA-Z0-9 _.-]+$/)
+    .required(),
+
+  contentType: Joi.string()
+    .valid("image/jpeg", "image/png", "image/webp")
+    .required(),
+
+  fileSize: Joi.number()
+    .integer()
+    .min(1)
+    .max(5 * 1024 * 1024)
+    .required(),
+})
+  .unknown(false);
+
+export const confirmChildImageUploadSchema = Joi.object({
+  key: Joi.string()
+    .trim()
+    .pattern(
+      /^profiles\/users\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i
+    )
+    .required(),
+})
+  .unknown(false);
 
 export const requestChildEmailChangeSchema = Joi.object({
   newEmail: Joi.string().trim().email().max(100).required(),

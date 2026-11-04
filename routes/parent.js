@@ -1,10 +1,32 @@
 import express from "express";
 
-import { createParent, deleteParent, getAllParents, importParents, linkParentToStudent, unlinkParentFromStudent, getParentDashboard, requestChildEmailChange,
-verifyChildEmailChange, } from "../controllers/parent.js";
-import { createParentSchema, deleteParentSchema, getAllParentsSchema, importParentsSchema, linkParentToStudentSchema, unlinkParentFromStudentSchema, childEmailChangeParamsSchema,
-requestChildEmailChangeSchema,
-verifyChildEmailChangeSchema, } from "../validation/parent.js";
+import {
+  createParent,
+  deleteParent,
+  getAllParents,
+  importParents,
+  linkParentToStudent,
+  unlinkParentFromStudent,
+  getParentDashboard,
+  requestChildEmailChange,
+  verifyChildEmailChange,
+  requestChildProfileImageUpload,
+  confirmChildProfileImageUpload,
+} from "../controllers/parent.js";
+
+import {
+  createParentSchema,
+  deleteParentSchema,
+  getAllParentsSchema,
+  importParentsSchema,
+  linkParentToStudentSchema,
+  unlinkParentFromStudentSchema,
+  childStudentParamsSchema,
+  requestChildEmailChangeSchema,
+  verifyChildEmailChangeSchema,
+  requestChildImageUploadUrlSchema,
+  confirmChildImageUploadSchema,
+} from "../validation/parent.js";
 
 import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
@@ -68,12 +90,32 @@ router.get(
   getParentDashboard
 );
 
+// Request an upload link for a linked child's profile image.
+router.post(
+  "/children/:studentId/image/upload-url",
+  protectRoutes,
+  authorize("PARENT"),
+  validate(childStudentParamsSchema, "params"),
+  validate(requestChildImageUploadUrlSchema, "body"),
+  requestChildProfileImageUpload
+);
+
+// Confirm the upload and save it as the child's profile image.
+router.patch(
+  "/children/:studentId/image/confirm",
+  protectRoutes,
+  authorize("PARENT"),
+  validate(childStudentParamsSchema, "params"),
+  validate(confirmChildImageUploadSchema, "body"),
+  confirmChildProfileImageUpload
+);
+
 // Request a change to a linked child's email address.
 router.post(
   "/children/:studentId/email-change/request",
   protectRoutes,
   authorize("PARENT"),
-  validate(childEmailChangeParamsSchema, "params"),
+  validate(childStudentParamsSchema, "params"),
   validate(requestChildEmailChangeSchema, "body"),
   requestChildEmailChange
 );
@@ -83,7 +125,7 @@ router.post(
   "/children/:studentId/email-change/verify",
   protectRoutes,
   authorize("PARENT"),
-  validate(childEmailChangeParamsSchema, "params"),
+  validate(childStudentParamsSchema, "params"),
   validate(verifyChildEmailChangeSchema, "body"),
   verifyChildEmailChange
 );
