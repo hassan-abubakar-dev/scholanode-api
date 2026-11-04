@@ -35,3 +35,23 @@ export const submitAttendanceSchema = Joi.object({
     .min(1)
     .required(),
 });
+
+export const attendanceHistoryQuerySchema = Joi.object({
+  sessionId: Joi.string().uuid().optional(),
+
+  termId: Joi.string().uuid().optional(),
+
+  classId: Joi.string().uuid().optional(),
+
+  fromDate: Joi.date().iso().optional(),
+
+  toDate: Joi.date().iso().optional(),
+
+  status: Joi.string()
+    .valid("DRAFT", "SUBMITTED")
+    .optional(),
+
+  page: Joi.number().integer().min(1).default(1),
+
+  limit: Joi.number().integer().min(1).max(100).default(10),
+});

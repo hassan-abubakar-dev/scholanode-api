@@ -5,13 +5,16 @@ import {
   getTodayAttendance,
   createTodayAttendance,
   saveAttendanceDraft,
-  submitAttendance
+  submitAttendance,
+   getAttendanceHistory,
+  getAttendanceHistoryDetails
 } from "../controllers/attendance.js";
 
 import {
   registerIdSchema,
   saveAttendanceDraftSchema,
-  submitAttendanceSchema
+  submitAttendanceSchema,
+  attendanceHistoryQuerySchema
 } from "../validation/attendance.js";
 
 import validate from "../middleware/validation.js";
@@ -48,6 +51,20 @@ router.patch(
   validate(registerIdSchema, "params"),
   validate(submitAttendanceSchema, "body"),
   submitAttendance
+);
+
+router.get(
+  "/history",
+  protectRoutes,
+  validate(attendanceHistoryQuerySchema, "query"),
+  getAttendanceHistory
+);
+
+router.get(
+  "/history/:registerId",
+  protectRoutes,
+  validate(registerIdSchema, "params"),
+  getAttendanceHistoryDetails
 );
 
 

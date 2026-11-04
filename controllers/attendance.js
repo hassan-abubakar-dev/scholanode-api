@@ -1,4 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
+import { Op } from "sequelize";
 import { Class, Student, User, Session, Term, WorkingDay, AttendanceRegister, AttendanceRecord } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
@@ -984,5 +985,395 @@ export const submitAttendance = async (req, res, next) => {
     }
 
     return handleControllerError(error, next, req, "ATTENDANCE_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+
+// ============================================
+// ATTENDANCE HISTORY — ADMINISTRATOR ACCESS
+// ============================================
+
+const assertAttendanceHistoryAccess = (req) => {
+  const allowedRoles = [
+    "LEADER",
+    "VICE_LEADER",
+    "ADMINISTRATOR",
+  ];
+
+  if (!req.user?.schoolId) {
+    throw new AppError("Authenticated school not found.", 401);
+  }
+
+  if (!allowedRoles.includes(req.user?.role)) {
+    throw new AppError(
+      "You are not authorized to access attendance history.",
+      403
+    );
+  }
+};
+
+
+// ============================================
+// 1. GET ATTENDANCE HISTORY
+// ============================================
+
+export const getAttendanceHistory = async (req, res, next) => {
+  try {
+    assertAttendanceHistoryAccess(req);
+
+    const schoolId = req.user.schoolId;
+
+    const {
+      sessionId,
+      termId,
+      classId,
+      formMasterId,
+      fromDate,
+      toDate,
+      status,
+    } = req.query;
+
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number.parseInt(req.query.limit, 10) || 10, 1),
+      100
+    );
+
+    const offset = (page - 1) * limit;
+
+    // Always restrict the query to the authenticated school.
+    const where = { schoolId };
+
+    if (sessionId) where.sessionId = sessionId;
+    if (termId) where.termId = termId;
+    if (classId) where.classId = classId;
+    if (formMasterId) where.createdByUserId = formMasterId;
+    if (status) where.status = status;
+
+    // Optional attendance date range.
+    if (fromDate && toDate) {
+      where.attendanceDate = {
+        [Op.between]: [fromDate, toDate],
+      };
+    } else if (fromDate) {
+      where.attendanceDate = {
+        [Op.gte]: fromDate,
+      };
+    } else if (toDate) {
+      where.attendanceDate = {
+        [Op.lte]: toDate,
+      };
+    }
+
+    // Retrieve registers without joining the hasMany attendance records.
+    // This prevents duplicate registers from affecting pagination.
+    const { count, rows: registers } =
+      await AttendanceRegister.findAndCountAll({
+        where,
+        attributes: [
+          "id",
+          "attendanceDate",
+          "status",
+          "createdByUserId",
+          "createdAt",
+          "updatedAt",
+        ],
+        include: [
+          {
+            model: Class,
+            as: "class",
+            attributes: ["id", "classLevel", "arm"],
+            required: true,
+            where: { schoolId },
+          },
+          {
+            model: Session,
+            as: "session",
+            attributes: ["id", "sessionName"],
+            required: true,
+          },
+          {
+            model: Term,
+            as: "term",
+            attributes: ["id", "termName"],
+            required: true,
+          },
+          {
+            model: User,
+            as: "createdBy",
+            attributes: [
+              "id",
+              "firstName",
+              "surName",
+              "loginId",
+            ],
+            required: true,
+            where: { schoolId },
+          },
+        ],
+        order: [
+          ["attendanceDate", "DESC"],
+          ["createdAt", "DESC"],
+        ],
+        limit,
+        offset,
+        distinct: true,
+      });
+
+    // Get attendance counts for the registers on this page.
+    const registerIds = registers.map((register) => register.id);
+
+    const attendanceRecords = registerIds.length
+      ? await AttendanceRecord.findAll({
+          where: {
+            attendanceRegisterId: {
+              [Op.in]: registerIds,
+            },
+          },
+          attributes: [
+            "attendanceRegisterId",
+            "status",
+          ],
+          raw: true,
+        })
+      : [];
+
+    // Calculate counts independently for each register.
+    const countsByRegister = new Map();
+
+    for (const registerId of registerIds) {
+      countsByRegister.set(registerId, {
+        totalStudents: 0,
+        presentCount: 0,
+        absentCount: 0,
+        unconfirmedCount: 0,
+      });
+    }
+
+    for (const record of attendanceRecords) {
+      const counts = countsByRegister.get(
+        record.attendanceRegisterId
+      );
+
+      if (!counts) continue;
+
+      counts.totalStudents += 1;
+
+      if (record.status === "PRESENT") {
+        counts.presentCount += 1;
+      } else if (record.status === "ABSENT") {
+        counts.absentCount += 1;
+      } else {
+        counts.unconfirmedCount += 1;
+      }
+    }
+
+    const data = registers.map((register) => ({
+      ...register.toJSON(),
+      attendanceSummary: countsByRegister.get(register.id),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance history retrieved successfully.",
+      data,
+      pagination: {
+        totalItems: count,
+        currentPage: page,
+        pageSize: limit,
+        totalPages: Math.ceil(count / limit),
+        hasNextPage: page * limit < count,
+        hasPreviousPage: page > 1,
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "ATTENDANCE_CONTROLLER_ERROR",
+      "Unable to retrieve attendance history. Please try again."
+    );
+  }
+};
+
+
+// ============================================
+// 2. GET ATTENDANCE HISTORY DETAILS
+// ============================================
+
+export const getAttendanceHistoryDetails = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    assertAttendanceHistoryAccess(req);
+
+    const schoolId = req.user.schoolId;
+    const { registerId } = req.params;
+
+    if (!registerId) {
+      throw new AppError(
+        "Attendance register ID is required.",
+        400
+      );
+    }
+
+    // Find the register within the authenticated school.
+    const register = await AttendanceRegister.findOne({
+      where: {
+        id: registerId,
+        schoolId,
+      },
+      attributes: [
+        "id",
+        "schoolId",
+        "classId",
+        "sessionId",
+        "termId",
+        "attendanceDate",
+        "createdByUserId",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ],
+      include: [
+        {
+          model: Class,
+          as: "class",
+          attributes: ["id", "classLevel", "arm"],
+          required: true,
+          where: { schoolId },
+        },
+        {
+          model: Session,
+          as: "session",
+          attributes: ["id", "sessionName"],
+          required: true,
+        },
+        {
+          model: Term,
+          as: "term",
+          attributes: ["id", "termName"],
+          required: true,
+        },
+        {
+          model: User,
+          as: "createdBy",
+          attributes: [
+            "id",
+            "firstName",
+            "surName",
+            "loginId",
+          ],
+          required: true,
+          where: { schoolId },
+        },
+      ],
+    });
+
+    if (!register) {
+      throw new AppError(
+        "Attendance register not found.",
+        404
+      );
+    }
+
+    // Retrieve the students recorded against this historical register.
+    // Do not use the class's current student roster here.
+    const attendanceRecords = await AttendanceRecord.findAll({
+      where: {
+        attendanceRegisterId: register.id,
+      },
+      attributes: [
+        "id",
+        "studentId",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ],
+      include: [
+        {
+          model: Student,
+          as: "student",
+          attributes: [
+            "id",
+            "admissionNumber",
+            "gender",
+          ],
+          required: true,
+          where: { schoolId },
+          include: [
+            {
+              model: User,
+              as: "user",
+              attributes: [
+                "firstName",
+                "surName",
+              ],
+              required: true,
+              where: { schoolId },
+            },
+          ],
+        },
+      ],
+      order: [
+        [
+          { model: Student, as: "student" },
+          "admissionNumber",
+          "ASC",
+        ],
+      ],
+    });
+
+    const students = attendanceRecords.map((record) => {
+      const student = record.student;
+
+      return {
+        attendanceRecordId: record.id,
+        studentId: student.id,
+        admissionNumber: student.admissionNumber,
+        firstName: student.user?.firstName ?? null,
+        surName: student.user?.surName ?? null,
+        gender: student.gender,
+        status: record.status,
+      };
+    });
+
+    const presentCount = students.filter(
+      (student) => student.status === "PRESENT"
+    ).length;
+
+    const absentCount = students.filter(
+      (student) => student.status === "ABSENT"
+    ).length;
+
+    const unconfirmedCount = students.filter(
+      (student) => student.status === null
+    ).length;
+
+    return res.status(200).json({
+      success: true,
+      message: "Attendance register details retrieved successfully.",
+      data: {
+        attendanceRegister: register,
+        attendanceSummary: {
+          totalStudents: students.length,
+          presentCount,
+          absentCount,
+          unconfirmedCount,
+        },
+        students,
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "ATTENDANCE_CONTROLLER_ERROR",
+      "Unable to retrieve attendance register details. Please try again."
+    );
   }
 };
