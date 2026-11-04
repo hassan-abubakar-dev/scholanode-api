@@ -154,9 +154,39 @@ app.use(errorHandler);
 // Database Sync and Server Startup
 const PORT = process.env.PORT || 5000; 
 
+// A listen failure arrives as an 'error' event, not a rejected promise, so the
+// bootstrap try/catch below cannot see it. Without this handler Node rethrows it
+// as an unhandled error and dumps a stack trace instead of a usable message.
+httpServer.on("error", (error) => {
+    console.error("\n❌ Failed to start server");
+
+    if (error.code === "EADDRINUSE") {
+        console.error(
+            `Port ${PORT} is already in use. Another copy of this API is still running - stop it before starting this one.`
+        );
+        console.error(`Find the process holding it with: netstat -ano | findstr :${PORT}`);
+    } else {
+        console.error("Error code:", error.code);
+        console.error("Error message:", error.message);
+    }
+
+    process.exit(1);
+});
+
+// Release the port on shutdown, otherwise a killed-but-not-exited process keeps
+// it bound and the next start collides with EADDRINUSE.
+const shutdown = (signal) => {
+    console.log(`${signal} received, closing HTTP server...`);
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5000).unref();
+};
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => shutdown(signal));
+}
 
 (async () => {
-    try {
+    try { 
         console.log("Testing database connection...");
         await testConnection();
 
