@@ -47,6 +47,17 @@ const ADMINISTRATIVE_ROLES = [
   "ADMINISTRATOR",
 ];
 
+// Staff invitations are created with these placeholder names until the
+// invited person completes their profile with their real name.
+const PENDING_PROFILE_NAMES = {
+  firstName: "firstName",
+  surName: "surName",
+};
+
+const hasPendingProfile = (user) =>
+  user.firstName === PENDING_PROFILE_NAMES.firstName &&
+  user.surName === PENDING_PROFILE_NAMES.surName;
+
 const requireStaffManagementAccess = async (
   req,
   { administrativeOnly = false } = {}
@@ -136,6 +147,7 @@ export const getAllStaff = async (req, res, next) => {
           profileImageUrl: profileImageKey
             ? await getPrivateFileUrl(profileImageKey)
             : null,
+          profilePending: hasPendingProfile(member),
         };
       })
     );
@@ -352,6 +364,7 @@ export const updateStaff = async (req, res, next) => {
         profileImageUrl: staff.profileImageKey
           ? await getPrivateFileUrl(staff.profileImageKey)
           : null,
+        profilePending: hasPendingProfile(staff),
         loginId: staff.loginId,
         role: staff.role,
         status: staff.status,
@@ -643,8 +656,8 @@ export const inviteStaff = async (req, res, next) => {
     const newStaff = await User.create(
       {
         schoolId,
-        firstName: "firstName",
-        surName: "surName",
+        firstName: PENDING_PROFILE_NAMES.firstName,
+        surName: PENDING_PROFILE_NAMES.surName,
         email,
         loginId,
         passwordHash,
@@ -729,6 +742,7 @@ export const inviteStaff = async (req, res, next) => {
         status: newStaff.status,
         mustChangePassword: newStaff.mustChangePassword,
         profileCompleted: newStaff.profileCompleted,
+        profilePending: hasPendingProfile(newStaff),
       },
     });
   } catch (error) {
