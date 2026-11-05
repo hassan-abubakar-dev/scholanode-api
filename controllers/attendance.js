@@ -1,9 +1,79 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Op } from "sequelize";
+import { fn, col, Op } from "sequelize";
 import { Class, Student, User, Session, Term, WorkingDay, AttendanceRegister, AttendanceRecord } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
 import { getPrivateFileUrl } from "../services/storage/r2.service.js";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
+
+// School days are counted in the school's own timezone, never the server's,
+// so a register created at 00:30 in Lagos is not filed under the previous day.
+const ACADEMIC_TIME_ZONE = "Africa/Lagos";
+
+const lagosDateKey = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: ACADEMIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+
+const lagosWeekday = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: ACADEMIC_TIME_ZONE,
+    weekday: "long",
+  })
+    .format(date)
+    .toUpperCase();
+
+// The session and term the school is running right now. Attendance can only be
+// changed while its register still belongs to this pair.
+const findCurrentAcademicPeriod = async (schoolId, options = {}) => {
+  const currentSession = await Session.findOne({
+    where: {
+      schoolId,
+      status: "ACTIVE",
+      isCurrent: true,
+    },
+    ...options,
+  });
+
+  if (!currentSession) {
+    return { currentSession: null, currentTerm: null };
+  }
+
+  const currentTerm = await Term.findOne({
+    where: {
+      sessionId: currentSession.id,
+      status: "ACTIVE",
+      isCurrent: true,
+    },
+    ...options,
+  });
+
+  return { currentSession, currentTerm };
+};
+
+// The period pair a form master may still edit, and the label the page shows
+// instead of a hardcoded session or term name.
+const serializeAcademicPeriod = ({ currentSession, currentTerm }) => ({
+  session: currentSession
+    ? {
+        id: currentSession.id,
+        sessionName: currentSession.sessionName,
+        startDate: currentSession.startDate,
+        endDate: currentSession.endDate,
+      }
+    : null,
+  term: currentTerm
+    ? {
+        id: currentTerm.id,
+        termName: currentTerm.termName,
+        startDate: currentTerm.startDate,
+        endDate: currentTerm.endDate,
+      }
+    : null,
+});
 
 // Get today's attendance page for the authenticated form master.
 
@@ -20,22 +90,7 @@ export const getTodayAttendance = async (req, res, next) => {
     }
 
     // 1. Calculate today's date using Nigeria's local timezone.
-    const timeZone = "Africa/Lagos";
-    const now = new Date();
-
-    const dateParts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(now);
-
-    const dateValues = Object.fromEntries(
-      dateParts.map(({ type, value }) => [type, value])
-    );
-
-    const attendanceDate =
-      `${dateValues.year}-${dateValues.month}-${dateValues.day}`;
+    const attendanceDate = lagosDateKey();
 
     // 2. Retrieve the authenticated form master's identity.
     const formMaster = await User.findOne({
@@ -49,6 +104,7 @@ export const getTodayAttendance = async (req, res, next) => {
         "id",
         "firstName",
         "surName",
+        "email",
         "loginId",
       ],
     });
@@ -59,6 +115,14 @@ export const getTodayAttendance = async (req, res, next) => {
         403
       );
     }
+
+    const formMasterProfile = serializeStaffProfile({
+      id: formMaster.id,
+      firstName: formMaster.firstName,
+      surName: formMaster.surName,
+      email: formMaster.email,
+      loginId: formMaster.loginId,
+    });
 
     // 3. Find the form master's assigned class.
     const assignedClasses = await Class.findAll({
@@ -84,7 +148,13 @@ export const getTodayAttendance = async (req, res, next) => {
 
     const assignedClass = assignedClasses[0];
 
-    // 4. Look for today's register.
+    // 4. Look up the period the school is currently running. Attendance may
+    // only be changed while a register still belongs to this session and term.
+    const academicPeriod = serializeAcademicPeriod(
+      await findCurrentAcademicPeriod(schoolId)
+    );
+
+    // 5. Look for today's register.
     // This function never creates one.
     const register = await AttendanceRegister.findOne({
       where: {
@@ -94,7 +164,7 @@ export const getTodayAttendance = async (req, res, next) => {
       },
     });
 
-    // 5. If no register exists, return the form master's
+    // 6. If no register exists, return the form master's
     // identity and assigned class so the frontend can show
     // the Take Attendance button.
     if (!register) {
@@ -103,20 +173,17 @@ export const getTodayAttendance = async (req, res, next) => {
         message: "Today's attendance has not been started.",
         data: {
           attendanceDate,
-          formMaster: {
-            id: formMaster.id,
-            firstName: formMaster.firstName,
-            surName: formMaster.surName,
-            loginId: formMaster.loginId,
-          },
+          academicPeriod,
+          formMaster: formMasterProfile,
           class: assignedClass,
           attendanceRegister: null,
+          permissions: { canEdit: false },
           students: [],
         },
       });
     }
 
-    // 6. Get the current active class roster.
+    // 7. Get the current active class roster.
     const classStudents = await Student.findAll({
       where: {
         schoolId,
@@ -142,7 +209,7 @@ export const getTodayAttendance = async (req, res, next) => {
       order: [["createdAt", "ASC"]],
     });
 
-    // 7. Load saved attendance records for this register.
+    // 8. Load saved attendance records for this register.
     const savedRecords = await AttendanceRecord.findAll({
       where: {
         attendanceRegisterId: register.id,
@@ -157,7 +224,7 @@ export const getTodayAttendance = async (req, res, next) => {
       ])
     );
 
-    // 8. Return the complete roster with saved attendance statuses.
+    // 9. Return the complete roster with saved attendance statuses.
     const students = await Promise.all(
       classStudents.map(async (student) => ({
         studentId: student.id,
@@ -179,14 +246,15 @@ export const getTodayAttendance = async (req, res, next) => {
       message: "Today's attendance retrieved successfully.",
       data: {
         attendanceDate,
-        formMaster: {
-          id: formMaster.id,
-          firstName: formMaster.firstName,
-          surName: formMaster.surName,
-          loginId: formMaster.loginId,
-        },
+        academicPeriod,
+        formMaster: formMasterProfile,
         class: assignedClass,
         attendanceRegister: register,
+        permissions: {
+          canEdit:
+            register.sessionId === academicPeriod.session?.id &&
+            register.termId === academicPeriod.term?.id,
+        },
         students,
       },
     });
@@ -210,29 +278,8 @@ export const createTodayAttendance = async (req, res, next) => {
     }
 
     // 1. Calculate today's date and weekday in Nigeria.
-    const timeZone = "Africa/Lagos";
-    const now = new Date();
-
-    const dateParts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(now);
-
-    const dateValues = Object.fromEntries(
-      dateParts.map(({ type, value }) => [type, value])
-    );
-
-    const attendanceDate =
-      `${dateValues.year}-${dateValues.month}-${dateValues.day}`;
-
-    const today = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      weekday: "long",
-    })
-      .format(now)
-      .toUpperCase();
+    const attendanceDate = lagosDateKey();
+    const today = lagosWeekday();
 
     // 2. Find the form master's assigned class.
     const assignedClasses = await Class.findAll({
@@ -306,15 +353,11 @@ export const createTodayAttendance = async (req, res, next) => {
       );
     }
 
-    // 5. Find the active academic session.
-    const activeSession = await Session.findOne({
-      where: {
-        schoolId,
-        status: "ACTIVE",
-        isCurrent: true,
-      },
-      transaction,
-    });
+    // 5. Find the academic session and term the school is running.
+    const {
+      currentSession: activeSession,
+      currentTerm: activeTerm,
+    } = await findCurrentAcademicPeriod(schoolId, { transaction });
 
     if (!activeSession) {
       throw new AppError(
@@ -323,16 +366,7 @@ export const createTodayAttendance = async (req, res, next) => {
       );
     }
 
-    // 6. Find the active term in that session.
-    const activeTerm = await Term.findOne({
-      where: {
-        sessionId: activeSession.id,
-        status: "ACTIVE",
-        isCurrent: true,
-      },
-      transaction,
-    });
-
+    // 6. Confirm that term exists too.
     if (!activeTerm) {
       throw new AppError(
         "There is no active academic term for your school.",
@@ -529,36 +563,16 @@ export const saveAttendanceDraft = async (req, res, next) => {
     }
 
     // 6. Save Draft is only allowed for today's attendance.
-    const dateParts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Africa/Lagos",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(new Date());
-
-    const dateValues = Object.fromEntries(
-      dateParts.map(({ type, value }) => [type, value])
-    );
-
-    const today =
-      `${dateValues.year}-${dateValues.month}-${dateValues.day}`;
-
-    if (register.attendanceDate !== today) {
+    if (register.attendanceDate !== lagosDateKey()) {
       throw new AppError(
         "You can only save drafts for today's attendance.",
         400
       );
     }
 
-    // 7. Confirm the school's current academic session.
-    const currentSession = await Session.findOne({
-      where: {
-        schoolId,
-        status: "ACTIVE",
-        isCurrent: true,
-      },
-      transaction,
-    });
+    // 7. Confirm the school is running a session with an active term.
+    const { currentSession, currentTerm } =
+      await findCurrentAcademicPeriod(schoolId, { transaction });
 
     if (!currentSession) {
       throw new AppError(
@@ -567,16 +581,6 @@ export const saveAttendanceDraft = async (req, res, next) => {
       );
     }
 
-    // 8. Confirm the current term belongs to the current session.
-    const currentTerm = await Term.findOne({
-      where: {
-        sessionId: currentSession.id,
-        status: "ACTIVE",
-        isCurrent: true,
-      },
-      transaction,
-    });
-
     if (!currentTerm) {
       throw new AppError(
         "The school does not have a current term configured for its current session.",
@@ -584,7 +588,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       );
     }
 
-    // 9. Prevent saving a register outside the current session or term.
+    // 8. Prevent saving a register outside the current session or term.
     if (
       register.sessionId !== currentSession.id ||
       register.termId !== currentTerm.id
@@ -595,7 +599,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       );
     }
 
-    // 10. Get the active students currently assigned to this class.
+    // 9. Get the active students currently assigned to this class.
     const classStudents = await Student.findAll({
       where: {
         schoolId,
@@ -617,7 +621,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       classStudents.map((student) => student.id)
     );
 
-    // 11. Reject students outside the assigned class.
+    // 10. Reject students outside the assigned class.
     const invalidStudent = students.find(
       (student) => !validStudentIds.has(student.studentId)
     );
@@ -629,7 +633,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       );
     }
 
-    // 12. Require the complete class roster.
+    // 11. Require the complete class roster.
     if (
       students.length !== classStudents.length ||
       classStudents.some((student) => !studentIds.includes(student.id))
@@ -640,7 +644,7 @@ export const saveAttendanceDraft = async (req, res, next) => {
       );
     }
 
-    // 13. Create missing records or update existing records.
+    // 12. Create missing records or update existing records.
     for (const student of students) {
       const existingRecord = await AttendanceRecord.findOne({
         where: {
@@ -805,15 +809,9 @@ export const submitAttendance = async (req, res, next) => {
       );
     }
 
-    // 5. Find the school's current active session.
-    const currentSession = await Session.findOne({
-      where: {
-        schoolId,
-        isCurrent: true,
-        status: "ACTIVE",
-      },
-      transaction,
-    });
+    // 5. Find the session and term the school is running right now.
+    const { currentSession, currentTerm } =
+      await findCurrentAcademicPeriod(schoolId, { transaction });
 
     if (!currentSession) {
       throw new AppError(
@@ -822,16 +820,6 @@ export const submitAttendance = async (req, res, next) => {
       );
     }
 
-    // 6. Find the current active term within that session.
-    const currentTerm = await Term.findOne({
-      where: {
-        sessionId: currentSession.id,
-        isCurrent: true,
-        status: "ACTIVE",
-      },
-      transaction,
-    });
-
     if (!currentTerm) {
       throw new AppError(
         "The school does not have a current active term.",
@@ -839,7 +827,7 @@ export const submitAttendance = async (req, res, next) => {
       );
     }
 
-    // 7. Ensure the register belongs to the current session and term.
+    // 6. Ensure the register belongs to the current session and term.
     if (
       register.sessionId !== currentSession.id ||
       register.termId !== currentTerm.id
@@ -850,42 +838,59 @@ export const submitAttendance = async (req, res, next) => {
       );
     }
 
-    // 8. Retrieve the current active class roster.
-    const classStudents = await Student.findAll({
-      where: {
-        schoolId,
-        currentClassId: assignedClass.id,
-        admissionStatus: "ACTIVE",
-      },
-      attributes: ["id"],
-      transaction,
-    });
+    // 7. Work out which students this register must cover.
+    // Today's register follows the live class roster, but a correction to an
+    // earlier day is judged against the students recorded on that day: a
+    // pupil who has since left the class still attended, or missed, that day.
+    const isCurrentDay =
+      register.attendanceDate === lagosDateKey();
 
-    if (classStudents.length === 0) {
+    const rosterStudentIds = isCurrentDay
+      ? (
+          await Student.findAll({
+            where: {
+              schoolId,
+              currentClassId: assignedClass.id,
+              admissionStatus: "ACTIVE",
+            },
+            attributes: ["id"],
+            transaction,
+          })
+        ).map((student) => student.id)
+      : (
+          await AttendanceRecord.findAll({
+            where: { attendanceRegisterId: register.id },
+            attributes: ["studentId"],
+            transaction,
+            raw: true,
+          })
+        ).map((record) => record.studentId);
+
+    if (rosterStudentIds.length === 0) {
       throw new AppError(
-        "There are no active students in this class.",
+        isCurrentDay
+          ? "There are no active students in this class."
+          : "No students are recorded on this attendance register.",
         409
       );
     }
 
-    const currentStudentIds = new Set(
-      classStudents.map((student) => student.id)
-    );
+    const roster = new Set(rosterStudentIds);
 
-    // 9. Ensure the request contains exactly the current roster.
+    // 8. Ensure the request contains exactly that roster.
     if (
-      students.length !== classStudents.length ||
-      students.some(
-        (student) => !currentStudentIds.has(student.studentId)
-      )
+      students.length !== roster.size ||
+      students.some((student) => !roster.has(student.studentId))
     ) {
       throw new AppError(
-        "The submitted attendance list does not match the current class roster. Refresh and try again.",
+        isCurrentDay
+          ? "The submitted attendance list does not match the current class roster. Refresh and try again."
+          : "The submitted attendance list does not match the students recorded on this register. Refresh and try again.",
         409
       );
     }
 
-    // 10. Save the latest statuses.
+    // 9. Save the latest statuses.
     // Update existing records and create missing ones.
     for (const student of students) {
       const [record, created] = await AttendanceRecord.findOrCreate({
@@ -909,7 +914,7 @@ export const submitAttendance = async (req, res, next) => {
       }
     }
 
-    // 11. Read back and verify the saved records.
+    // 10. Read back and verify the saved records.
     const attendanceRecords = await AttendanceRecord.findAll({
       where: {
         attendanceRegisterId: register.id,
@@ -925,20 +930,20 @@ export const submitAttendance = async (req, res, next) => {
       ])
     );
 
-    const incomplete = classStudents.some((student) => {
-      const status = recordsByStudentId.get(student.id);
+    const incomplete = rosterStudentIds.some((studentId) => {
+      const status = recordsByStudentId.get(studentId);
 
       return status !== "PRESENT" && status !== "ABSENT";
     });
 
     const hasUnexpectedRecord = attendanceRecords.some(
-      (record) => !currentStudentIds.has(record.studentId)
+      (record) => !roster.has(record.studentId)
     );
 
     if (
       incomplete ||
       hasUnexpectedRecord ||
-      attendanceRecords.length !== classStudents.length
+      attendanceRecords.length !== rosterStudentIds.length
     ) {
       throw new AppError(
         "Attendance could not be saved because the records do not match the complete class roster.",
@@ -946,7 +951,7 @@ export const submitAttendance = async (req, res, next) => {
       );
     }
 
-    // 12. Mark the register as submitted.
+    // 11. Mark the register as submitted.
     // A submitted register remains submitted when corrected.
     await register.update(
       { status: "SUBMITTED" },
@@ -974,7 +979,7 @@ export const submitAttendance = async (req, res, next) => {
           attendanceDate: register.attendanceDate,
           status: "SUBMITTED",
         },
-        totalStudents: classStudents.length,
+        totalStudents: rosterStudentIds.length,
         presentCount,
         absentCount,
       },
@@ -1012,6 +1017,153 @@ const assertAttendanceHistoryAccess = (req) => {
   }
 };
 
+// Present, absent and unconfirmed counts per register, read from the records
+// themselves so a historical register keeps the numbers of its own day rather
+// than those of the class roster today.
+const getAttendanceSummaries = async (registerIds) => {
+  const summaries = new Map(
+    registerIds.map((registerId) => [
+      registerId,
+      {
+        totalStudents: 0,
+        presentCount: 0,
+        absentCount: 0,
+        unconfirmedCount: 0,
+      },
+    ])
+  );
+
+  if (!registerIds.length) return summaries;
+
+  const records = await AttendanceRecord.findAll({
+    where: {
+      attendanceRegisterId: {
+        [Op.in]: registerIds,
+      },
+    },
+    attributes: ["attendanceRegisterId", "status"],
+    raw: true,
+  });
+
+  for (const record of records) {
+    const counts = summaries.get(record.attendanceRegisterId);
+
+    if (!counts) continue;
+
+    counts.totalStudents += 1;
+
+    if (record.status === "PRESENT") {
+      counts.presentCount += 1;
+    } else if (record.status === "ABSENT") {
+      counts.absentCount += 1;
+    } else {
+      counts.unconfirmedCount += 1;
+    }
+  }
+
+  return summaries;
+};
+
+// A register may only be changed while it still belongs to the session and
+// term the school is running.
+const isRegisterInCurrentPeriod = (register, currentPeriod) =>
+  Boolean(
+    currentPeriod.currentSession &&
+      currentPeriod.currentTerm &&
+      register.sessionId === currentPeriod.currentSession.id &&
+      register.termId === currentPeriod.currentTerm.id
+  );
+
+// Date-range filter shared by the administrator and form-master history lists.
+const buildAttendanceDateFilter = ({ fromDate, toDate }) => {
+  if (fromDate && toDate) {
+    return { [Op.between]: [fromDate, toDate] };
+  }
+
+  if (fromDate) return { [Op.gte]: fromDate };
+
+  if (toDate) return { [Op.lte]: toDate };
+
+  return undefined;
+};
+
+// Only the sessions and terms that actually have registers are offered as
+// filters, so a history page never lists a period that shows nothing.
+const getAttendancePeriodFacets = async (registerWhere) => {
+  const periodPairs = await AttendanceRegister.findAll({
+    where: registerWhere,
+    attributes: ["sessionId", "termId"],
+    group: ["sessionId", "termId"],
+    raw: true,
+  });
+
+  const sessionIds = [
+    ...new Set(periodPairs.map((pair) => pair.sessionId)),
+  ];
+  const termIds = [...new Set(periodPairs.map((pair) => pair.termId))];
+
+  const [sessions, terms] = await Promise.all([
+    Session.findAll({
+      where: { id: { [Op.in]: sessionIds } },
+      attributes: ["id", "sessionName", "startDate"],
+      order: [["startDate", "DESC"]],
+    }),
+    Term.findAll({
+      where: { id: { [Op.in]: termIds } },
+      attributes: ["id", "termName", "sessionId", "startDate"],
+      order: [["startDate", "DESC"]],
+    }),
+  ]);
+
+  return { sessions, terms };
+};
+
+// School-wide totals for the current filters, counted from the records
+// themselves so the summary cards cover every matching register instead of
+// only the page on screen.
+const getAggregateAttendanceSummary = async (registerWhere, totalRegisters) => {
+  const statusRows = await AttendanceRecord.findAll({
+    attributes: ["status", [fn("COUNT", col("AttendanceRecord.id")), "count"]],
+    include: [
+      {
+        model: AttendanceRegister,
+        as: "attendanceRegister",
+        attributes: [],
+        required: true,
+        where: registerWhere,
+      },
+    ],
+    group: ["AttendanceRecord.status"],
+    raw: true,
+  });
+
+  let presentCount = 0;
+  let absentCount = 0;
+  let unmarkedCount = 0;
+
+  for (const row of statusRows) {
+    const count = Number(row.count) || 0;
+
+    if (row.status === "PRESENT") presentCount += count;
+    else if (row.status === "ABSENT") absentCount += count;
+    else unmarkedCount += count;
+  }
+
+  const markedCount = presentCount + absentCount;
+
+  return {
+    totalRegisters,
+    totalRecords: presentCount + absentCount + unmarkedCount,
+    presentCount,
+    absentCount,
+    unmarkedCount,
+    markedCount,
+    attendanceRate: markedCount
+      ? Math.round((presentCount / markedCount) * 1000) / 10
+      : null,
+  };
+};
+
 
 // ============================================
 // 1. GET ATTENDANCE HISTORY
@@ -1027,7 +1179,6 @@ export const getAttendanceHistory = async (req, res, next) => {
       sessionId,
       termId,
       classId,
-      formMasterId,
       fromDate,
       toDate,
       status,
@@ -1047,22 +1198,13 @@ export const getAttendanceHistory = async (req, res, next) => {
     if (sessionId) where.sessionId = sessionId;
     if (termId) where.termId = termId;
     if (classId) where.classId = classId;
-    if (formMasterId) where.createdByUserId = formMasterId;
     if (status) where.status = status;
 
     // Optional attendance date range.
-    if (fromDate && toDate) {
-      where.attendanceDate = {
-        [Op.between]: [fromDate, toDate],
-      };
-    } else if (fromDate) {
-      where.attendanceDate = {
-        [Op.gte]: fromDate,
-      };
-    } else if (toDate) {
-      where.attendanceDate = {
-        [Op.lte]: toDate,
-      };
+    const dateFilter = buildAttendanceDateFilter({ fromDate, toDate });
+
+    if (dateFilter) {
+      where.attendanceDate = dateFilter;
     }
 
     // Retrieve registers without joining the hasMany attendance records.
@@ -1072,6 +1214,9 @@ export const getAttendanceHistory = async (req, res, next) => {
         where,
         attributes: [
           "id",
+          "classId",
+          "sessionId",
+          "termId",
           "attendanceDate",
           "status",
           "createdByUserId",
@@ -1082,7 +1227,7 @@ export const getAttendanceHistory = async (req, res, next) => {
           {
             model: Class,
             as: "class",
-            attributes: ["id", "classLevel", "arm"],
+            attributes: ["id", "classLevel", "arm", "formMasterId"],
             required: true,
             where: { schoolId },
           },
@@ -1105,6 +1250,7 @@ export const getAttendanceHistory = async (req, res, next) => {
               "id",
               "firstName",
               "surName",
+              "email",
               "loginId",
             ],
             required: true,
@@ -1120,63 +1266,37 @@ export const getAttendanceHistory = async (req, res, next) => {
         distinct: true,
       });
 
-    // Get attendance counts for the registers on this page.
-    const registerIds = registers.map((register) => register.id);
+    const summaries = await getAttendanceSummaries(
+      registers.map((register) => register.id)
+    );
 
-    const attendanceRecords = registerIds.length
-      ? await AttendanceRecord.findAll({
-          where: {
-            attendanceRegisterId: {
-              [Op.in]: registerIds,
-            },
-          },
-          attributes: [
-            "attendanceRegisterId",
-            "status",
-          ],
-          raw: true,
-        })
-      : [];
+    // Totals span every register matching these filters, not just this page,
+    // and the period options follow the class that is being looked at.
+    const [summary, availablePeriods] = await Promise.all([
+      getAggregateAttendanceSummary(where, count),
+      getAttendancePeriodFacets({
+        schoolId,
+        ...(classId ? { classId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      }),
+    ]);
 
-    // Calculate counts independently for each register.
-    const countsByRegister = new Map();
-
-    for (const registerId of registerIds) {
-      countsByRegister.set(registerId, {
-        totalStudents: 0,
-        presentCount: 0,
-        absentCount: 0,
-        unconfirmedCount: 0,
-      });
-    }
-
-    for (const record of attendanceRecords) {
-      const counts = countsByRegister.get(
-        record.attendanceRegisterId
-      );
-
-      if (!counts) continue;
-
-      counts.totalStudents += 1;
-
-      if (record.status === "PRESENT") {
-        counts.presentCount += 1;
-      } else if (record.status === "ABSENT") {
-        counts.absentCount += 1;
-      } else {
-        counts.unconfirmedCount += 1;
-      }
-    }
-
+    // Administrators read every class but never edit it: editing belongs to
+    // the form master who owns the register.
     const data = registers.map((register) => ({
       ...register.toJSON(),
-      attendanceSummary: countsByRegister.get(register.id),
+      createdBy: register.createdBy
+        ? serializeStaffProfile(register.createdBy)
+        : register.createdBy,
+      attendanceSummary: summaries.get(register.id),
     }));
 
     return res.status(200).json({
       success: true,
       message: "Attendance history retrieved successfully.",
       data,
+      summary,
+      availablePeriods,
       pagination: {
         totalItems: count,
         currentPage: page,
@@ -1199,7 +1319,163 @@ export const getAttendanceHistory = async (req, res, next) => {
 
 
 // ============================================
-// 2. GET ATTENDANCE HISTORY DETAILS
+// 2. GET FORM MASTER'S OWN ATTENDANCE HISTORY
+// ============================================
+
+export const getMyAttendanceHistory = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const userId = req.user?.id;
+
+    if (!schoolId || !userId) {
+      throw new AppError(
+        "Authenticated school or user not found.",
+        401
+      );
+    }
+
+    // The class comes from the caller, never from the query string, so a form
+    // master can only ever read their own register history.
+    const assignedClasses = await Class.findAll({
+      where: {
+        schoolId,
+        formMasterId: userId,
+      },
+    });
+
+    if (assignedClasses.length === 0) {
+      throw new AppError(
+        "You are not assigned as a form master to any class.",
+        403
+      );
+    }
+
+    if (assignedClasses.length > 1) {
+      throw new AppError(
+        "You are assigned to multiple classes. Please contact your administrator.",
+        409
+      );
+    }
+
+    const assignedClass = assignedClasses[0];
+
+    const { sessionId, termId, fromDate, toDate, status } =
+      req.query;
+
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number.parseInt(req.query.limit, 10) || 10, 1),
+      100
+    );
+
+    const offset = (page - 1) * limit;
+
+    const where = { schoolId, classId: assignedClass.id };
+
+    if (sessionId) where.sessionId = sessionId;
+    if (termId) where.termId = termId;
+    if (status) where.status = status;
+
+    const dateFilter = buildAttendanceDateFilter({
+      fromDate,
+      toDate,
+    });
+
+    if (dateFilter) {
+      where.attendanceDate = dateFilter;
+    }
+
+    const { count, rows: registers } =
+      await AttendanceRegister.findAndCountAll({
+        where,
+        attributes: [
+          "id",
+          "sessionId",
+          "termId",
+          "attendanceDate",
+          "status",
+          "createdAt",
+          "updatedAt",
+        ],
+        include: [
+          {
+            model: Session,
+            as: "session",
+            attributes: ["id", "sessionName"],
+            required: true,
+          },
+          {
+            model: Term,
+            as: "term",
+            attributes: ["id", "termName"],
+            required: true,
+          },
+        ],
+        order: [
+          ["attendanceDate", "DESC"],
+          ["createdAt", "DESC"],
+        ],
+        limit,
+        offset,
+        distinct: true,
+      });
+
+    const summaries = await getAttendanceSummaries(
+      registers.map((register) => register.id)
+    );
+
+    const currentPeriod =
+      await findCurrentAcademicPeriod(schoolId);
+
+    // Only the sessions and terms this class actually has registers for are
+    // offered as filters, so the page never lists an empty period.
+    const [summary, availablePeriods] = await Promise.all([
+      getAggregateAttendanceSummary(where, count),
+      getAttendancePeriodFacets({
+        schoolId,
+        classId: assignedClass.id,
+        ...(sessionId ? { sessionId } : {}),
+      }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Your attendance history retrieved successfully.",
+      data: {
+        class: assignedClass,
+        academicPeriod: serializeAcademicPeriod(currentPeriod),
+        availablePeriods,
+        summary,
+        registers: registers.map((register) => ({
+          ...register.toJSON(),
+          attendanceSummary: summaries.get(register.id),
+          canEdit: isRegisterInCurrentPeriod(register, currentPeriod),
+        })),
+      },
+      pagination: {
+        totalItems: count,
+        currentPage: page,
+        pageSize: limit,
+        totalPages: Math.ceil(count / limit),
+        hasNextPage: page * limit < count,
+        hasPreviousPage: page > 1,
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "ATTENDANCE_CONTROLLER_ERROR",
+      "Unable to retrieve your attendance history. Please try again."
+    );
+  }
+};
+
+
+// ============================================
+// 3. GET ATTENDANCE HISTORY DETAILS
 // ============================================
 
 export const getAttendanceHistoryDetails = async (
@@ -1208,7 +1484,9 @@ export const getAttendanceHistoryDetails = async (
   next
 ) => {
   try {
-    assertAttendanceHistoryAccess(req);
+    if (!req.user?.schoolId) {
+      throw new AppError("Authenticated school not found.", 401);
+    }
 
     const schoolId = req.user.schoolId;
     const { registerId } = req.params;
@@ -1242,7 +1520,7 @@ export const getAttendanceHistoryDetails = async (
         {
           model: Class,
           as: "class",
-          attributes: ["id", "classLevel", "arm"],
+          attributes: ["id", "classLevel", "arm", "formMasterId"],
           required: true,
           where: { schoolId },
         },
@@ -1265,6 +1543,7 @@ export const getAttendanceHistoryDetails = async (
             "id",
             "firstName",
             "surName",
+            "email",
             "loginId",
           ],
           required: true,
@@ -1278,6 +1557,15 @@ export const getAttendanceHistoryDetails = async (
         "Attendance register not found.",
         404
       );
+    }
+
+    // The class's own form master may read the register so they can review and
+    // correct it; anyone else needs administrator history access.
+    const isFormMaster =
+      register.class?.formMasterId === req.user.id;
+
+    if (!isFormMaster) {
+      assertAttendanceHistoryAccess(req);
     }
 
     // Retrieve the students recorded against this historical register.
@@ -1353,11 +1641,33 @@ export const getAttendanceHistoryDetails = async (
       (student) => student.status === null
     ).length;
 
+    const currentPeriod =
+      await findCurrentAcademicPeriod(schoolId);
+
+    const canEdit =
+      isFormMaster && isRegisterInCurrentPeriod(register, currentPeriod);
+
+    const registerPayload = register.toJSON();
+
     return res.status(200).json({
       success: true,
       message: "Attendance register details retrieved successfully.",
       data: {
-        attendanceRegister: register,
+        attendanceRegister: {
+          ...registerPayload,
+          createdBy: registerPayload.createdBy
+            ? serializeStaffProfile(registerPayload.createdBy)
+            : registerPayload.createdBy,
+        },
+        academicPeriod: serializeAcademicPeriod(currentPeriod),
+        permissions: {
+          canEdit,
+          reason: canEdit
+            ? null
+            : isFormMaster
+            ? "This register belongs to a session or term that is no longer current, so it can no longer be changed."
+            : "Only the form master of this class can change its attendance.",
+        },
         attendanceSummary: {
           totalStudents: students.length,
           presentCount,

@@ -55,3 +55,10 @@ export const attendanceHistoryQuerySchema = Joi.object({
 
   limit: Joi.number().integer().min(1).max(100).default(10),
 });
+
+// The form master's own history has no class filter: the class is always
+// resolved from the authenticated account.
+export const myAttendanceHistoryQuerySchema =
+  attendanceHistoryQuerySchema.fork(["classId"], (schema) =>
+    schema.forbidden()
+  );

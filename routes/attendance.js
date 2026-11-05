@@ -7,6 +7,7 @@ import {
   saveAttendanceDraft,
   submitAttendance,
    getAttendanceHistory,
+  getMyAttendanceHistory,
   getAttendanceHistoryDetails
 } from "../controllers/attendance.js";
 
@@ -14,7 +15,8 @@ import {
   registerIdSchema,
   saveAttendanceDraftSchema,
   submitAttendanceSchema,
-  attendanceHistoryQuerySchema
+  attendanceHistoryQuerySchema,
+  myAttendanceHistoryQuerySchema
 } from "../validation/attendance.js";
 
 import validate from "../middleware/validation.js";
@@ -51,6 +53,15 @@ router.patch(
   validate(registerIdSchema, "params"),
   validate(submitAttendanceSchema, "body"),
   submitAttendance
+);
+
+// Registers the authenticated form master's own class, for review and
+// correction within the current session and term.
+router.get(
+  "/my-history",
+  protectRoutes,
+  validate(myAttendanceHistoryQuerySchema, "query"),
+  getMyAttendanceHistory
 );
 
 router.get(
