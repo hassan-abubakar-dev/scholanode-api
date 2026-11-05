@@ -8,6 +8,7 @@ import { dbConnection } from "../config/db.js";
 import { likeCondition } from "../utils/dbHelper.js";
 import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 import { emitNotificationCount } from "../utils/notificationSocket.js";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
 
 
 // Staff roles that may scan when explicitly authorized.
@@ -779,7 +780,7 @@ export const authorizeStaffScanner = async (req, res, next) => {
         role: { [Op.in]: ELIGIBLE_SCANNER_ROLES },
         status: "ACTIVE",
       },
-      attributes: ["id", "firstName", "surName", "role"],
+      attributes: ["id", "firstName", "surName", "email", "role"],
     });
 
     if (!staff) {
@@ -817,14 +818,15 @@ export const authorizeStaffScanner = async (req, res, next) => {
     return res.status(created ? 201 : 200).json({
       success: true,
       message: "Staff member authorized to scan successfully.",
-      scanner: {
+      scanner: serializeStaffProfile({
         id: permission.id,
         userId: staff.id,
         firstName: staff.firstName,
         surName: staff.surName,
+        email: staff.email,
         role: staff.role,
         isActive: permission.isActive,
-      },
+      }),
     });
   } catch (error) {
     return handleControllerError(error, next, req, "GATESCANNER_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
@@ -910,6 +912,7 @@ export const getAuthorizedScanners = async (req, res, next) => {
         "id",
         "firstName",
         "surName",
+        "email",
         "loginId",
         "role",
         "status",
@@ -923,18 +926,19 @@ export const getAuthorizedScanners = async (req, res, next) => {
     const scanners = permissions.map((permission) => {
       const staff = staffMap.get(permission.userId);
 
-      return {
+      return serializeStaffProfile({
         id: permission.id,
         userId: permission.userId,
         firstName: staff?.firstName ?? null,
         surName: staff?.surName ?? null,
+        email: staff?.email ?? null,
         loginId: staff?.loginId ?? null,
         role: staff?.role ?? null,
         accountStatus: staff?.status ?? null,
         isActive: permission.isActive,
         createdAt: permission.createdAt,
         updatedAt: permission.updatedAt,
-      };
+      });
     });
 
     return res.status(200).json({
@@ -1120,7 +1124,7 @@ export const getScanHistory = async (req, res, next) => {
         {
           model: User,
           as: "scannedBy",
-          attributes: ["id", "firstName", "surName", "role"],
+          attributes: ["id", "firstName", "surName", "email", "role"],
           required: true,
         },
       ],
@@ -1136,7 +1140,13 @@ export const getScanHistory = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Gate scan history retrieved successfully.",
-      data: rows,
+      data: rows.map((record) => {
+        const item = record.toJSON();
+
+        return item.scannedBy
+          ? { ...item, scannedBy: serializeStaffProfile(item.scannedBy) }
+          : item;
+      }),
       pagination: {
         totalItems: count,
         currentPage: Number(page),

@@ -3,6 +3,7 @@ import { Complaint } from "../relationships/associations.js";
 import { Op, fn, col } from "sequelize";
 
 import AppError from "../utils/AppError.js";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
 
 // ==========================================
 // HELPERS
@@ -222,7 +223,7 @@ export const getSchoolComplaints = async (req, res, next) => {
       include: [
         {
           association: "sender",
-          attributes: ["id", "firstName", "surName", "role"],
+          attributes: ["id", "firstName", "surName", "email", "role"],
           required: false,
         },
       ],
@@ -232,7 +233,14 @@ export const getSchoolComplaints = async (req, res, next) => {
     });
 
     // Remove sender identity from anonymous complaints.
-    const complaints = rows.map(hideAnonymousIdentity);
+    // Pending names are masked afterwards so anonymity always wins.
+    const complaints = rows.map((record) => {
+      const complaint = hideAnonymousIdentity(record);
+
+      return complaint.sender
+        ? { ...complaint, sender: serializeStaffProfile(complaint.sender) }
+        : complaint;
+    });
 
     // Summary counts are independent of the list filters.
     const groupedCounts = await Complaint.findAll({

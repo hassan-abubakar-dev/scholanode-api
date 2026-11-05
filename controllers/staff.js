@@ -16,6 +16,7 @@ import { getPrivateFileUrl } from "../services/storage/r2.service.js";
 import {
   PENDING_PROFILE_NAMES,
   hasPendingProfile,
+  serializeStaffProfile,
 } from "../utils/pendingProfile.js";
 
 
@@ -199,14 +200,14 @@ export const deactivateStaff = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Staff account deactivated successfully.",
-      staff: {
+      staff: serializeStaffProfile({
         id: staff.id,
         firstName: staff.firstName,
         surName: staff.surName,
         loginId: staff.loginId,
         role: staff.role,
         status: staff.status,
-      },
+      }),
     });
   } catch (error) {
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
@@ -259,14 +260,14 @@ export const activateStaff = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Staff account reactivated successfully.",
-      staff: {
+      staff: serializeStaffProfile({
         id: staff.id,
         firstName: staff.firstName,
         surName: staff.surName,
         loginId: staff.loginId,
         role: staff.role,
         status: staff.status,
-      },
+      }),
     });
   } catch (error) {
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
@@ -348,7 +349,7 @@ export const updateStaff = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Staff details updated successfully.",
-      staff: {
+      staff: serializeStaffProfile({
         id: staff.id,
         firstName: staff.firstName,
         surName: staff.surName,
@@ -357,13 +358,12 @@ export const updateStaff = async (req, res, next) => {
         profileImageUrl: staff.profileImageKey
           ? await getPrivateFileUrl(staff.profileImageKey)
           : null,
-        profilePending: hasPendingProfile(staff),
         loginId: staff.loginId,
         role: staff.role,
         status: staff.status,
         lastLoginAt: staff.lastLoginAt,
         createdAt: staff.createdAt,
-      },
+      }),
     });
   } catch (error) {
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");

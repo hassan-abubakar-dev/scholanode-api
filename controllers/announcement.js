@@ -4,6 +4,7 @@ import { Op } from "sequelize";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
 import { likeCondition } from "../utils/dbHelper.js";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
 
 const allowedManagementRoles = [
     "LEADER",
@@ -52,7 +53,7 @@ const getAnnouncementFilters = (query) => {
 
 const getCreatorInclude = () => ({
     association: "creator",
-    attributes: ["id", "firstName", "surName", "role"],
+    attributes: ["id", "firstName", "surName", "email", "role"],
     required: false,
 });
 
@@ -75,7 +76,16 @@ const getPaginatedAnnouncements = async ({
     });
 
     return {
-        announcements: rows,
+        announcements: rows.map((record) => {
+            const announcement = record.toJSON();
+
+            return announcement.creator
+                ? {
+                      ...announcement,
+                      creator: serializeStaffProfile(announcement.creator),
+                  }
+                : announcement;
+        }),
         pagination: {
             page,
             limit,

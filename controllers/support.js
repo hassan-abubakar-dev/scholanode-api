@@ -4,6 +4,7 @@ import { Op } from "sequelize";
 import { dbConnection } from "../config/db.js";
 
 import AppError from "../utils/AppError.js";
+import { serializeStaffProfile } from "../utils/pendingProfile.js";
 
 // ==========================================
 // CONSTANTS
@@ -285,6 +286,7 @@ export const getConversationMessages = async (
             "id",
             "firstName",
             "surName",
+            "email",
             "role",
           ],
           required: false,
@@ -305,7 +307,18 @@ export const getConversationMessages = async (
       distinct: true,
     });
 
-    const messages = rows.reverse();
+    const messages = rows
+      .reverse()
+      .map((record) => {
+        const message = record.toJSON();
+
+        return message.senderUser
+          ? {
+              ...message,
+              senderUser: serializeStaffProfile(message.senderUser),
+            }
+          : message;
+      });
 
     return res.status(200).json({
       success: true,
