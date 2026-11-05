@@ -70,3 +70,36 @@ export const changePasswordSchema = Joi.object({
       "any.required": "New password is required.",
     }),
 }).required();
+
+// The first-login profile form. A student's name is owned by the school, so the
+// name fields simply do not apply to that role.
+export const completeProfileSchema = Joi.object({
+  firstName: Joi.string()
+    .trim()
+    .min(2)
+    .max(50)
+    .messages({
+      "string.empty": "First name is required.",
+      "string.min": "First name must be at least 2 characters.",
+      "string.max": "First name cannot exceed 50 characters.",
+    }),
+
+  surName: Joi.string()
+    .trim()
+    .min(2)
+    .max(50)
+    .messages({
+      "string.empty": "Surname is required.",
+      "string.min": "Surname must be at least 2 characters.",
+      "string.max": "Surname cannot exceed 50 characters.",
+    }),
+
+  phoneNumber: Joi.string()
+    .trim()
+    .allow("", null)
+    .pattern(/^[+]?[0-9\s-]{7,20}$/)
+    .messages({
+      "string.pattern.base":
+        "Phone number may contain digits, spaces, hyphens and an optional + country code.",
+    }),
+}).required();

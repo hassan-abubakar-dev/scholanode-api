@@ -7,7 +7,8 @@ import {
   resetPassword,
   requestNewAccessToken,
   logOutUser,
-  changePassword 
+  changePassword,
+  completeProfile
 } from "../controllers/auth.js";
 import { protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
@@ -16,7 +17,8 @@ import {
   forgotLoginIdValidationSchema,
   forgotPasswordValidationSchema,
   resetPasswordValidationSchema,
-  changePasswordSchema 
+  changePasswordSchema,
+  completeProfileSchema
 } from "../validation/auth.js";
 
 
@@ -54,6 +56,14 @@ router.patch(
   protectRoutes,
   validate(changePasswordSchema, "body"),
   changePassword
+);
+
+// First-login ceremony: turn an invited placeholder account into a real one.
+router.patch(
+  "/complete-profile",
+  protectRoutes,
+  validate(completeProfileSchema, "body"),
+  completeProfile
 );
 
 export default router;

@@ -17,6 +17,7 @@ import { dbConnection } from '../config/db.js';
 import generateToken from '../utils/token.js';
 import generateVerificationCode from '../utils/verificationCode.js';
 import generateExpiryTime from '../utils/experyTime.js';
+import { PENDING_PROFILE_NAMES } from '../utils/pendingProfile.js';
 
 import {
   getPrivateFileUrl,
@@ -170,6 +171,8 @@ export const loginUser = async (req, res, next) => {
         role: user.role,
         status: user.status,
         isOwner,
+        mustChangePassword: user.mustChangePassword,
+        profileCompleted: user.profileCompleted,
       },
 
       school: {
@@ -383,6 +386,8 @@ export const getLoggedInUser = async (req, res, next) => {
       isFormMaster,
       formClass,
       canScanStudents,
+      mustChangePassword: user.mustChangePassword,
+      profileCompleted: user.profileCompleted,
       createdAt: user.createdAt,
     };
 
@@ -1163,6 +1168,96 @@ export const changePassword = async (req, res, next) => {
     });
   } catch (error) {
     console.error("CHANGE_PASSWORD_ERROR:", {
+      url: req.originalUrl,
+      method: req.method,
+      error,
+    });
+
+    return handleControllerError(error, next, req, "AUTH_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+// An invited account carries placeholder names and no contact number until its
+// owner signs in, so the first-login form is the point where the profile stops
+// being a placeholder.
+export const completeProfile = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return next(new AppError("Authentication is required.", 401));
+    }
+
+    const user = await User.findByPk(userId);
+
+    if (!user) {
+      return next(new AppError("User account not found.", 404));
+    }
+
+    const isStudent = user.role === "STUDENT";
+    const { firstName, surName, phoneNumber } = req.body;
+
+    // A student's name belongs to the school, exactly as on the profile page.
+    if (isStudent) {
+      if (firstName !== undefined || surName !== undefined) {
+        return next(
+          new AppError(
+            "Students cannot update their name. Please contact your school office.",
+            403
+          )
+        );
+      }
+    } else {
+      const names = [firstName, surName];
+
+      if (!names.every((name) => typeof name === "string" && name.length >= 2)) {
+        return next(
+          new AppError("Enter your real first name and surname.", 400)
+        );
+      }
+
+      // The invitation placeholders are not a name, whatever the casing.
+      const placeholders = Object.values(PENDING_PROFILE_NAMES).map((name) =>
+        name.toLowerCase()
+      );
+
+      if (names.some((name) => placeholders.includes(name.toLowerCase()))) {
+        return next(
+          new AppError("Enter your real first name and surname.", 400)
+        );
+      }
+
+      user.firstName = firstName;
+      user.surName = surName;
+    }
+
+    // Phone is optional for every role; an empty field simply leaves it unset.
+    if (phoneNumber) {
+      user.phoneNumber = phoneNumber;
+    }
+
+    user.profileCompleted = true;
+
+    await user.save();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Your profile has been completed. Welcome to ScholaNode.",
+      user: {
+        id: user.id,
+        loginId: user.loginId,
+        firstName: user.firstName,
+        surName: user.surName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        role: user.role,
+        status: user.status,
+        mustChangePassword: user.mustChangePassword,
+        profileCompleted: user.profileCompleted,
+      },
+    });
+  } catch (error) {
+    console.error("COMPLETE_PROFILE_ERROR:", {
       url: req.originalUrl,
       method: req.method,
       error,
