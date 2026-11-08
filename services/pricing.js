@@ -31,6 +31,10 @@ export const getPlanPricing = (plan) => {
 export const findPricingTier = (plan, tierId) => {
   const planPricing = getPlanPricing(plan);
 
+  if (!Array.isArray(planPricing)) {
+    throw new Error(`Pricing tiers for plan ${String(plan).toUpperCase()} are not configured.`);
+  }
+
   const tier = planPricing.find((item) => item.id === tierId);
 
   if (!tier) {
@@ -58,14 +62,31 @@ export const resolvePricing = ({
   tierId,
   billingCycle,
 }) => {
-  if (!plan || !tierId || !billingCycle) {
-    throw new Error(
-      "Plan, tier ID and billing cycle are required."
-    );
-  }
+  if (!plan) throw new Error("Plan is required.");
 
   const normalizedPlan = plan.toUpperCase();
-  const normalizedBillingCycle = billingCycle.toUpperCase();
+  const normalizedBillingCycle = billingCycle?.toUpperCase() || null;
+
+  if (normalizedPlan === "FREE") {
+    if (tierId != null || billingCycle != null) {
+      throw new Error("FREE subscriptions do not accept a tier or billing cycle.");
+    }
+
+    return {
+      plan: "FREE",
+      tierId: null,
+      minStudents: null,
+      maxStudents: pricingConfig.FREE.maxStudents,
+      billingCycle: null,
+      price: pricingConfig.FREE.price,
+      asLowAs: null,
+      message: null,
+    };
+  }
+
+  if (!tierId || !normalizedBillingCycle) {
+    throw new Error("Paid plans require a tier ID and billing cycle.");
+  }
 
   const tier = findPricingTier(
     normalizedPlan,

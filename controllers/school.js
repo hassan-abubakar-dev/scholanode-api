@@ -1,5 +1,10 @@
 import { handleControllerError } from "../utils/controllerError.js";
 import { School, User, Session, Term, Class, Subject, Owner, VerificationCode } from "../relationships/associations.js";
+import {
+  canonicalizeClassLevel,
+  canonicalizeArm,
+  normalizeOrInferEducationSection,
+} from "../utils/classCanonical.js";
 /**
  * @file controllers/school.js
  * @description Controller for school registration and management
@@ -12,7 +17,7 @@ import { Op, col, fn, where as sequelizeWhere } from 'sequelize';
 
 import { dbConnection } from "../config/db.js";
 
-import pricingConfig from '../config/pricing.js';
+import { resolvePricing } from "../services/pricing.js";
 import path from 'path';
 import {
   uploadPublicFile,
@@ -208,58 +213,26 @@ export const registerSchool = async (req, res, next) => {
     // VALIDATE TIER / BILLING CYCLE
     // =========================================================
 
-    let planPrice = 0;
-    let normalizedTierId = null;
-    let normalizedBillingCycle = null;
-
-    if (normalizedPlan !== "FREE") {
-      normalizedTierId = String(tierId ?? "").trim();
-      normalizedBillingCycle = String(billingCycle ?? "")
-        .trim()
-        .toUpperCase();
-
-      if (!normalizedTierId || !normalizedBillingCycle) {
-        await transaction.rollback();
-        return res.status(400).json({
-          status: "error",
-          message: "Paid plans require a tier and billing cycle.",
-        });
-      }
-
-      const planTiers = pricingConfig[normalizedPlan];
-
-      if (!Array.isArray(planTiers) || planTiers.length === 0) {
-        await transaction.rollback();
-        return res.status(400).json({
-          status: "error",
-          message: `Pricing for ${normalizedPlan} is not configured.`,
-        });
-      }
-
-      const tier = planTiers.find(
-        (item) => String(item.id) === normalizedTierId
-      );
-
-      if (!tier) {
-        await transaction.rollback();
-        return res.status(400).json({
-          status: "error",
-          message: `Invalid tier ID for plan ${normalizedPlan}.`,
-        });
-      }
-
-      const pricing = tier[normalizedBillingCycle];
-
-      if (!pricing || typeof pricing.price !== "number") {
-        await transaction.rollback();
-        return res.status(400).json({
-          status: "error",
-          message: `Billing cycle ${normalizedBillingCycle} is not available for tier ${normalizedTierId}.`,
-        });
-      }
-
-      planPrice = pricing.price;
+    let resolvedPricing;
+    try {
+      resolvedPricing = resolvePricing({
+        plan: normalizedPlan,
+        tierId: tierId == null ? null : String(tierId).trim(),
+        billingCycle: billingCycle == null
+          ? null
+          : String(billingCycle).trim().toUpperCase(),
+      });
+    } catch (error) {
+      await transaction.rollback();
+      return res.status(400).json({
+        status: "error",
+        message: error.message,
+      });
     }
+
+    const normalizedTierId = resolvedPricing.tierId;
+    const normalizedBillingCycle = resolvedPricing.billingCycle;
+    const planPrice = resolvedPricing.price;
 
     // Do not replace an existing pending registration without proving
     // ownership through the existing verification flow.
@@ -341,6 +314,11 @@ export const registerSchool = async (req, res, next) => {
         schoolLevel: normalizedSchoolLevel,
         ownershipType: normalizedOwnershipType,
 
+        // Temporary plan selection fields
+        selectedPlan: normalizedPlan,
+        selectedTierId: normalizedPlan === "FREE" ? null : normalizedTierId,
+        selectedBillingCycle: normalizedPlan === "FREE" ? null : normalizedBillingCycle,
+
         // Registration has not yet been verified.
         status: "PENDING_VERIFICATION",
 
@@ -415,6 +393,7 @@ export const registerSchool = async (req, res, next) => {
         code: verificationCode,
         expiryTime,
         userEmail: normalizedUserEmail,
+        purpose: "SCHOOL_REGISTRATION",
       },
       {
         transaction,

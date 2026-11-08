@@ -39,21 +39,38 @@ const School = dbConnection.define(
     },
 
     schoolLevel: {
-  type: DataTypes.ENUM(
-    "PRIMARY",
-    "SECONDARY",
-    "COMBINED"
-  ),
-  allowNull: false,
-},
+      type: DataTypes.ENUM("PRIMARY", "SECONDARY", "COMBINED"),
+      allowNull: false,
+    },
 
-ownershipType: {
-  type: DataTypes.ENUM(
-    "GOVERNMENT",
-    "PRIVATE"
-  ),
-  allowNull: false,
-},
+    ownershipType: {
+      type: DataTypes.ENUM("GOVERNMENT", "PRIVATE"),
+      allowNull: false,
+    },
+
+    // ===============================
+    // TEMPORARY REGISTRATION PLAN
+    // ===============================
+
+    selectedPlan: {
+      type: DataTypes.ENUM(
+        "FREE",
+        "STARTER",
+        "STANDARD",
+        "PROFESSIONAL"
+      ),
+      allowNull: true,
+    },
+
+    selectedTierId: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+
+    selectedBillingCycle: {
+      type: DataTypes.ENUM("MONTHLY", "TERMLY", "YEARLY"),
+      allowNull: true,
+    },
 
     // ===============================
     // COMPLETED DURING SCHOOL SETUP
@@ -77,27 +94,25 @@ ownershipType: {
       allowNull: true,
     },
 
-
     welcomeMessage: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
 
-
     // ===============================
     // SYSTEM FIELDS
     // ===============================
 
-  status: {
-  type: DataTypes.ENUM(
-    "PENDING_VERIFICATION",
-    "PENDING_ACTIVATION",
-    "ACTIVE",
-    "SUSPENDED"
-  ),
-  allowNull: false,
-  defaultValue: "PENDING_VERIFICATION",
-},
+    status: {
+      type: DataTypes.ENUM(
+        "PENDING_VERIFICATION",
+        "PENDING_ACTIVATION",
+        "ACTIVE",
+        "SUSPENDED"
+      ),
+      allowNull: false,
+      defaultValue: "PENDING_VERIFICATION",
+    },
   },
   {
     tableName: "Schools",

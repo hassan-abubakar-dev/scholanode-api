@@ -2,6 +2,9 @@ import { User, VerificationCode, School } from "../relationships/associations.js
 import AppError from "../utils/AppError.js";
 import generateToken from "../utils/token.js";
 import { dbConnection } from "../config/db.js";
+import { createFreeSubscriptionForSchool } from "../services/subscription.js";
+import pricingConfig from "../config/pricing.js";
+import { resolvePricing } from "../services/pricing.js";
 
 import dotenv from "dotenv";
 
@@ -27,10 +30,15 @@ const normalizeEmail = (email) => email.trim().toLowerCase();
  * that JavaScript can parse.
  */
 const isCodeExpired = (expiryTime) => {
-    const expiryTimestamp = Number(expiryTime);
+    const expiryTimestamp =
+        expiryTime instanceof Date ? expiryTime.getTime() : Number(expiryTime);
 
     if (!Number.isFinite(expiryTimestamp)) {
-        return true;
+        const parsed = Date.parse(expiryTime);
+        if (!Number.isFinite(parsed)) {
+            return true;
+        }
+        return Date.now() > parsed;
     }
 
     return Date.now() > expiryTimestamp;
@@ -166,7 +174,30 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
         school.isActive = false;
         await school.save({ transaction });
 
-        // 8. Consume only the code that was verified.
+        // 8. Validate the saved selection before completing verification.
+        let selectedPricing;
+        try {
+            selectedPricing = resolvePricing({
+                plan: school.selectedPlan,
+                tierId: school.selectedTierId,
+                billingCycle: school.selectedBillingCycle,
+            });
+        } catch {
+            throw new AppError(
+                "The school's saved subscription selection is invalid. Please register again.",
+                400
+            );
+        }
+
+        if (selectedPricing.plan === pricingConfig.FREE.plan) {
+            await createFreeSubscriptionForSchool({
+                school,
+                transaction,
+                verifiedAt: new Date(),
+            });
+        }
+
+        // 9. Consume only the code that was verified.
         await existingCode.destroy({ transaction });
 
         // 9. Commit all changes together.

@@ -1,9 +1,14 @@
 import express from "express";
+
 import { protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 
+import AppError from "../utils/AppError.js";
+
 import {
   getTimetable,
+  getSchoolWorkingDays,
+  generateTimetablePdf,
   createPeriod,
   updatePeriod,
   deletePeriod,
@@ -26,11 +31,45 @@ const router = express.Router();
 
 /*
 |--------------------------------------------------------------------------
+| Authorization Middleware
+|--------------------------------------------------------------------------
+*/
+
+const allowRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!allowedRoles.includes(req.user?.role)) {
+      return next(
+        new AppError(
+          "You are not authorized to perform this action.",
+          403
+        )
+      );
+    }
+
+    next();
+  };
+};
+
+const PERIOD_MANAGEMENT_ROLES = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+  "STAFF",
+];
+
+const LESSON_MANAGEMENT_ROLES = ["STAFF", "LEADER", "VICE_LEADER", "ADMINISTRATOR"];
+
+/*
+|--------------------------------------------------------------------------
 | Get Timetable
 |--------------------------------------------------------------------------
 */
 
 // GET /api/timetable?classId=<classId>
+//
+// Authorization is checked inside the controller because access
+// depends on the requested class and the authenticated user.
+
 router.get(
   "/",
   protectRoutes,
@@ -40,14 +79,40 @@ router.get(
 
 /*
 |--------------------------------------------------------------------------
+| Working Days & PDF Routes
+|--------------------------------------------------------------------------
+*/
+
+// GET /api/timetables/working-days
+router.get(
+  "/working-days",
+  protectRoutes,
+  getSchoolWorkingDays
+);
+
+// GET /api/timetables/pdf?classId=<classId>
+router.get(
+  "/pdf",
+  protectRoutes,
+  validate(timetableQuerySchema, "query"),
+  generateTimetablePdf
+);
+
+
+/*
+|--------------------------------------------------------------------------
 | Timetable Periods
 |--------------------------------------------------------------------------
 */
+
+// Shared school-wide period configuration.
+// Only school leadership and administrators can manage periods.
 
 // POST /api/timetable/periods
 router.post(
   "/periods",
   protectRoutes,
+  allowRoles(...PERIOD_MANAGEMENT_ROLES),
   validate(createPeriodSchema, "body"),
   createPeriod
 );
@@ -56,6 +121,7 @@ router.post(
 router.patch(
   "/periods/:periodId",
   protectRoutes,
+  allowRoles(...PERIOD_MANAGEMENT_ROLES),
   validate(periodParamsSchema, "params"),
   validate(updatePeriodSchema, "body"),
   updatePeriod
@@ -65,6 +131,7 @@ router.patch(
 router.delete(
   "/periods/:periodId",
   protectRoutes,
+  allowRoles(...PERIOD_MANAGEMENT_ROLES),
   validate(periodParamsSchema, "params"),
   deletePeriod
 );
@@ -75,10 +142,15 @@ router.delete(
 |--------------------------------------------------------------------------
 */
 
+// Only STAFF can access these management endpoints.
+// The controller additionally verifies that the user is the
+// Form Master assigned to the requested class.
+
 // POST /api/timetable/lessons
 router.post(
   "/lessons",
   protectRoutes,
+  allowRoles(...LESSON_MANAGEMENT_ROLES),
   validate(createLessonSchema, "body"),
   createLesson
 );
@@ -87,6 +159,7 @@ router.post(
 router.patch(
   "/lessons/:lessonId",
   protectRoutes,
+  allowRoles(...LESSON_MANAGEMENT_ROLES),
   validate(lessonParamsSchema, "params"),
   validate(updateLessonSchema, "body"),
   updateLesson
@@ -96,6 +169,7 @@ router.patch(
 router.delete(
   "/lessons/:lessonId",
   protectRoutes,
+  allowRoles(...LESSON_MANAGEMENT_ROLES),
   validate(lessonParamsSchema, "params"),
   deleteLesson
 );

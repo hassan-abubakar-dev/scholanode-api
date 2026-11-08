@@ -197,6 +197,19 @@ export const createSessionWithTerms = async (req, res, next) => {
 };
 
 
+
+export {
+  canonicalizeClassLevel,
+  canonicalizeArm,
+  inferEducationSection,
+  normalizeOrInferEducationSection,
+} from "../utils/classCanonical.js";
+import {
+  canonicalizeClassLevel,
+  canonicalizeArm,
+  normalizeOrInferEducationSection,
+} from "../utils/classCanonical.js";
+
 // Create a class and arm 
 export const createClass = async (req, res, next) => {
   try {

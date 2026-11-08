@@ -35,6 +35,8 @@ import Notification from "../models/Notification.js";
 import Announcement from "../models/Announcement.js";
 import Payment from "../models/Payment.js";
 import VerificationCode from "../models/VerificationCode.js";
+
+import ClassSubject from "../models/ClassSubject.js";
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -45,6 +47,16 @@ import VerificationCode from "../models/VerificationCode.js";
 School.hasOne(SubscriptionPlan, {
   foreignKey: "schoolId",
   as: "subscriptionPlan",
+});
+
+School.hasMany(Payment, {
+  foreignKey: "schoolId",
+  as: "payments",
+});
+
+Payment.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
 });
 
 SubscriptionPlan.belongsTo(School, {
@@ -759,6 +771,30 @@ Announcement.belongsTo(User, {
     as: "creator",
 });
 
+// ========================================
+// CLASS SUBJECT RELATIONSHIPS
+// ========================================
+
+Class.hasMany(ClassSubject, {
+  foreignKey: "classId",
+  as: "classSubjects",
+});
+
+ClassSubject.belongsTo(Class, {
+  foreignKey: "classId",
+  as: "class",
+});
+
+Subject.hasMany(ClassSubject, {
+  foreignKey: "subjectId",
+  as: "classSubjects",
+});
+
+ClassSubject.belongsTo(Subject, {
+  foreignKey: "subjectId",
+  as: "subject",
+});
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -794,5 +830,6 @@ TimetablePeriod,
   Notification,
   Announcement,
   Payment,
-  VerificationCode
+  VerificationCode,
+  ClassSubject
 };

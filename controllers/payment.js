@@ -1,133 +1,198 @@
-import { Payment, School } from "../relationships/associations.js";
 import axios from "axios";
 import crypto from "crypto";
+import { Op } from "sequelize";
+import {
+  Payment,
+  School,
+  SubscriptionPlan,
+} from "../relationships/associations.js";
+import { dbConnection } from "../config/db.js";
 import { resolvePricing } from "../services/pricing.js";
+import {
+  createPaidSubscriptionFromVerifiedPayment,
+} from "../services/subscription.js";
 import { handleControllerError } from "../utils/controllerError.js";
+import AppError from "../utils/AppError.js";
 
-// ========================================
-// INITIALIZE PAYMENT
-// ========================================
+const PAYSTACK_URL = "https://api.paystack.co";
+const PAYMENT_CURRENCY = "NGN";
+const MANAGER_ROLES = ["LEADER", "VICE_LEADER", "ADMINISTRATOR"];
+
+const paystackHeaders = () => ({
+  Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+  "Content-Type": "application/json",
+});
+
+const paymentMetadata = (pricing, schoolId) => ({
+  plan: pricing.plan,
+  tierId: pricing.tierId,
+  billingCycle: pricing.billingCycle,
+  minStudents: pricing.minStudents,
+  maxStudents: pricing.maxStudents,
+  schoolId,
+});
+
+const resolvePaymentMetadata = (metadata, schoolId) => {
+  if (metadata?.schoolId !== schoolId) {
+    throw new Error("Payment metadata does not match the payment school.");
+  }
+
+  const pricing = resolvePricing({
+    plan: metadata?.plan,
+    tierId: metadata?.tierId,
+    billingCycle: metadata?.billingCycle,
+  });
+
+  if (
+    metadata?.minStudents !== pricing.minStudents ||
+    metadata?.maxStudents !== pricing.maxStudents
+  ) {
+    throw new Error("Payment metadata does not match configured pricing.");
+  }
+
+  return pricing;
+};
+
+const isDefiniteProviderFailure = (error) =>
+  Boolean(error?.response && error.response.status >= 400);
 
 export const initializePayment = async (req, res, next) => {
   let payment;
 
   try {
-    const {
-      email,
-      plan,
-      tierId,
-      billingCycle,
-      metadata,
-    } = req.body;
+    const { email, plan, tierId, billingCycle } = req.body;
     const { schoolId } = req.params;
 
-
-
-    if (req.user?.schoolId && req.user.schoolId !== schoolId) {
-      return res.status(403).json({
-        success: false,
-        message: "You cannot initialize payment for another school.",
-      });
+    if (
+      !req.user ||
+      req.user.schoolId !== schoolId ||
+      !MANAGER_ROLES.includes(req.user.role)
+    ) {
+      throw new AppError(
+        "You are not authorized to initialize payment for this school.",
+        403
+      );
     }
-
-    // ========================================
-    // RESOLVE PRICING
-    // ========================================
-
-    let pricing;
-
-    try {
-      pricing = resolvePricing({
-        plan,
-        tierId,
-        billingCycle,
-      });
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    const amount = pricing.price;
-
-    const paymentMetadata = {
-      ...metadata,
-      plan: pricing.plan,
-      tierId: pricing.tierId,
-      billingCycle: pricing.billingCycle,
-      minStudents: pricing.minStudents,
-      maxStudents: pricing.maxStudents,
-    };
-
-    // ========================================
-    // CHECK IF SCHOOL EXISTS
-    // ========================================
 
     const school = await School.findByPk(schoolId);
 
     if (!school) {
-      return res.status(404).json({
-        success: false,
-        message: "School not found.",
-      });
+      throw new AppError("School not found.", 404);
     }
 
-    // ========================================
-    // GENERATE UNIQUE PAYMENT REFERENCE
-    // ========================================
+    if (school.status !== "PENDING_ACTIVATION") {
+      throw new AppError(
+        "This school is not eligible for initial paid activation.",
+        409
+      );
+    }
+
+    const existingSubscription = await SubscriptionPlan.findOne({
+      where: { schoolId },
+    });
+
+    if (existingSubscription) {
+      throw new AppError(
+        "This school already has a subscription.",
+        409
+      );
+    }
+
+    let pricing;
+
+    try {
+      pricing = resolvePricing({ plan, tierId, billingCycle });
+    } catch (error) {
+      throw new AppError(error.message, 400);
+    }
+
+    if (pricing.plan === "FREE" || pricing.price <= 0) {
+      throw new AppError(
+        "FREE plans cannot be initialized through the payment endpoint.",
+        400
+      );
+    }
+
+    if (
+      school.selectedPlan !== pricing.plan ||
+      String(school.selectedTierId) !== String(pricing.tierId) ||
+      school.selectedBillingCycle !== pricing.billingCycle
+    ) {
+      throw new AppError(
+        "The requested payment selection does not match the school's saved registration selection.",
+        409
+      );
+    }
+
+    const activeAttempt = await Payment.findOne({
+      where: {
+        schoolId,
+        status: { [Op.in]: ["PENDING", "PROCESSING"] },
+      },
+    });
+
+    if (activeAttempt) {
+      throw new AppError(
+        "An active payment attempt already exists for this school.",
+        409
+      );
+    }
 
     const reference = `SCH_PAY_${crypto.randomUUID()}`;
-
-    // ========================================
-    // CREATE PAYMENT RECORD
-    // ========================================
+    const metadata = paymentMetadata(pricing, schoolId);
 
     payment = await Payment.create({
       schoolId,
       reference,
-      amount,
-      currency: "NGN",
+      amount: pricing.price,
+      currency: PAYMENT_CURRENCY,
       status: "PENDING",
       provider: "PAYSTACK",
-      metadata: paymentMetadata,
+      metadata,
     });
 
-    // ========================================
-    // INITIALIZE PAYSTACK PAYMENT
-    // ========================================
+    let paystackResponse;
 
-    const paystackResponse = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        email,
-        amount: Math.round(Number(amount) * 100),
-        reference,
-
-        metadata: {
-          ...paymentMetadata,
-          schoolId,
+    try {
+      paystackResponse = await axios.post(
+        `${PAYSTACK_URL}/transaction/initialize`,
+        {
+          email,
+          amount: Math.round(Number(pricing.price) * 100),
+          reference,
+          metadata,
         },
-      },
+        { headers: paystackHeaders() }
+      );
+    } catch (error) {
+      // Only mark FAILED if the payment is still PENDING.
+      // A webhook may already have processed it.
+      if (isDefiniteProviderFailure(error)) {
+        await Payment.update(
+          { status: "FAILED" },
+          {
+            where: {
+              id: payment.id,
+              status: "PENDING",
+            },
+          }
+        );
+      }
+
+      throw error;
+    }
+
+    // Only transition PENDING -> PROCESSING.
+    // Never overwrite a status already changed by the webhook.
+    await Payment.update(
+      { status: "PROCESSING" },
       {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
+        where: {
+          id: payment.id,
+          status: "PENDING",
         },
       }
     );
-
-    // ========================================
-    // UPDATE PAYMENT STATUS
-    // ========================================
-
-    await payment.update({
-      status: "PROCESSING",
-    });
-
-    // ========================================
-    // RETURN PAYMENT URL
-    // ========================================
 
     return res.status(200).json({
       success: true,
@@ -141,16 +206,6 @@ export const initializePayment = async (req, res, next) => {
       },
     });
   } catch (error) {
-    // ========================================
-    // MARK PAYMENT AS FAILED
-    // ========================================
-
-    if (payment) {
-      await payment.update({
-        status: "FAILED",
-      });
-    }
-
     return handleControllerError(
       error,
       next,
@@ -161,214 +216,142 @@ export const initializePayment = async (req, res, next) => {
   }
 };
 
-
-// ========================================
-// PAYSTACK WEBHOOK
-// ========================================
+const signaturesMatch = (rawBody, signature) => {
+  if (!rawBody || typeof signature !== "string") return false;
+  const expected = crypto
+    .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY)
+    .update(rawBody)
+    .digest("hex");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const receivedBuffer = Buffer.from(signature, "utf8");
+  return (
+    expectedBuffer.length === receivedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  );
+};
 
 export const handlePaystackWebhook = async (req, res) => {
   try {
-    // req.body must be the raw request body (Buffer)
     const signature = req.headers["x-paystack-signature"];
-
-    if (!signature) {
-      return res.status(401).json({
-        success: false,
-        message: "Missing Paystack signature.",
-      });
-    }
-
-    // ========================================
-    // VERIFY WEBHOOK SIGNATURE
-    // ========================================
-
-    const hash = crypto
-      .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY)
-      .update(req.body)
-      .digest("hex");
-
-    if (hash !== signature) {
+    if (!signaturesMatch(req.body, signature)) {
       return res.status(401).json({
         success: false,
         message: "Invalid Paystack signature.",
       });
     }
 
-    // Convert raw body to JSON
-    const event = JSON.parse(req.body.toString());
-
-    // We only care about successful charges
+    const event = JSON.parse(req.body.toString("utf8"));
     if (event.event !== "charge.success") {
-      return res.status(200).json({
-        received: true,
-      });
+      return res.status(200).json({ received: true });
     }
 
-    const transaction = event.data;
-    const reference = transaction.reference;
+    const reference = event.data?.reference;
+    if (!reference) {
+      return res.status(400).json({ received: false });
+    }
 
-    // ========================================
-    // FIND LOCAL PAYMENT
-    // ========================================
-
-    const payment = await Payment.findOne({
-      where: { reference },
-    });
-
+    const payment = await Payment.findOne({ where: { reference } });
     if (!payment) {
-      console.error(
-        `PAYMENT_NOT_FOUND: ${reference}`
-      );
-
-      // Acknowledge webhook so Paystack does not
-      // keep retrying an unknown payment.
-      return res.status(200).json({
-        received: true,
-      });
+      return res.status(202).json({ received: true });
     }
-
-    // ========================================
-    // IDEMPOTENCY CHECK
-    // ========================================
-
-    if (payment.status === "SUCCESSFUL") {
-      return res.status(200).json({
-        received: true,
-        message: "Payment already processed.",
-      });
-    }
-
-    // ========================================
-    // VERIFY TRANSACTION WITH PAYSTACK
-    // ========================================
 
     const verificationResponse = await axios.get(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
+      `${PAYSTACK_URL}/transaction/verify/${encodeURIComponent(reference)}`,
+      { headers: paystackHeaders() }
     );
-
-    const verifiedTransaction =
-      verificationResponse.data.data;
-
-    // ========================================
-    // VERIFY PAYMENT STATUS
-    // ========================================
-
-    if (verifiedTransaction.status !== "success") {
-      console.error(
-        `PAYMENT_VERIFICATION_FAILED: ${reference}`
-      );
-
-      return res.status(200).json({
-        received: true,
-      });
-    }
-
-    // ========================================
-    // VERIFY AMOUNT
-    // ========================================
-
-    const expectedAmount = Math.round(
-      Number(payment.amount) * 100
-    );
-
-    if (verifiedTransaction.amount !== expectedAmount) {
-      console.error("PAYMENT_AMOUNT_MISMATCH:", {
-        reference,
-        expected: expectedAmount,
-        received: verifiedTransaction.amount,
-      });
-
-      return res.status(200).json({
-        received: true,
-      });
-    }
-
-    // ========================================
-    // VERIFY CURRENCY
-    // ========================================
+    const verified = verificationResponse.data?.data;
 
     if (
-      verifiedTransaction.currency !== payment.currency
+      verified?.reference !== reference ||
+      verified?.status !== "success" ||
+      Number(verified?.amount) !== Math.round(Number(payment.amount) * 100) ||
+      verified?.currency !== payment.currency
     ) {
-      console.error("PAYMENT_CURRENCY_MISMATCH:", {
-        reference,
-        expected: payment.currency,
-        received: verifiedTransaction.currency,
-      });
-
-      return res.status(200).json({
-        received: true,
+      return res.status(400).json({
+        received: false,
+        message: "Paystack transaction verification failed.",
       });
     }
 
-    // ========================================
-    // MARK PAYMENT SUCCESSFUL
-    // ========================================
+    const paidAt = new Date(verified.paid_at);
+    if (Number.isNaN(paidAt.getTime())) {
+      return res.status(400).json({
+        received: false,
+        message: "Verified payment date is invalid.",
+      });
+    }
 
-    await payment.update({
-      status: "SUCCESSFUL",
-      providerTransactionId:
-        String(verifiedTransaction.id),
-      paidAt: verifiedTransaction.paid_at
-        ? new Date(verifiedTransaction.paid_at)
-        : new Date(),
-    });
+    resolvePaymentMetadata(payment.metadata, payment.schoolId);
 
-    console.log(
-      `PAYMENT_SUCCESSFUL: ${reference}`
-    );
+    const transaction = await dbConnection.transaction();
+    try {
+      const lockedPayment = await Payment.findOne({
+        where: { id: payment.id },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-    // ========================================
-    // CREATE SUBSCRIPTION HERE
-    // ========================================
-    //
-    // await createSubscriptionFromPayment(payment);
-    //
-    // We will handle this separately.
+      if (!lockedPayment) throw new Error("Payment no longer exists.");
+      if (lockedPayment.status === "SUCCESSFUL") {
+        await transaction.rollback();
+        return res.status(200).json({
+          received: true,
+          message: "Payment already processed.",
+        });
+      }
 
-    return res.status(200).json({
-      received: true,
-    });
+      await lockedPayment.update(
+        {
+          status: "PROCESSING",
+          providerTransactionId: String(verified.id),
+          paidAt,
+        },
+        { transaction }
+      );
+
+      await createPaidSubscriptionFromVerifiedPayment({
+        payment: lockedPayment,
+        transaction,
+      });
+
+      await lockedPayment.update(
+        { status: "SUCCESSFUL" },
+        { transaction }
+      );
+      await transaction.commit();
+
+      return res.status(200).json({
+        received: true,
+        data: { reference, status: "SUCCESSFUL" },
+      });
+    } catch (error) {
+      if (!transaction.finished) await transaction.rollback();
+      throw error;
+    }
   } catch (error) {
-    console.error(
-      "PAYSTACK_WEBHOOK_ERROR:",
-      error.response?.data || error.message
-    );
-
-    return res.status(500).json({
-      received: false,
+    console.error("PAYSTACK_WEBHOOK_ERROR:", {
+      message: error.message,
+      reference: req.body?.toString?.().slice(0, 200),
     });
+    return res.status(500).json({ received: false });
   }
 };
-
-// ========================================
-// GET PAYMENT STATUS
-// ========================================
-
-// ========================================
-// GET PAYMENT STATUS
-// ======================================== 
 
 export const getPaymentStatus = async (req, res, next) => {
   try {
     const { reference } = req.params;
+    const payment = await Payment.findOne({ where: { reference } });
 
-
-
-    const payment = await Payment.findOne({
-      where: { reference },
-    });
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found.",
-      });
+    if (!payment) throw new AppError("Payment not found.", 404);
+    if (
+      !req.user ||
+      req.user.schoolId !== payment.schoolId ||
+      !MANAGER_ROLES.includes(req.user.role)
+    ) {
+      throw new AppError(
+        "You are not authorized to access this payment.",
+        403
+      );
     }
 
     return res.status(200).json({

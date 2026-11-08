@@ -37,6 +37,8 @@ import platformContactInquiryRouter from "./routes/platformContactInquiry.js";
 import profileRouter from "./routes/profile.js";
 import announcementRouter from "./routes/announcement.js"
 import notificationRouter from "./routes/notification.js";
+import classSubjectRouter from "./routes/classSubject.js";
+
 
 
 
@@ -147,6 +149,7 @@ app.use("/api/platform-contact-inquiries", platformContactInquiryRouter);
 app.use("/api/profiles", profileRouter)
 app.use("/api/announcements", announcementRouter);
 app.use("/api/notifications", notificationRouter);
+app.use("/api/class-subjects", classSubjectRouter);
 
 // error handle
 app.use(errorHandler);
@@ -191,7 +194,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         await testConnection();
 
         console.log("Synchronizing database models...");
-        await dbConnection.sync();
+        await dbConnection.sync({alter: true});
 
         console.log("Database connected and models synced successfully.");
 

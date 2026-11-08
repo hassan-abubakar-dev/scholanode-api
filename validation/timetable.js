@@ -1,6 +1,27 @@
 import Joi from "joi";
 
-const idSchema = Joi.string().trim().required();
+/*
+|--------------------------------------------------------------------------
+| Reusable Schemas
+|--------------------------------------------------------------------------
+*/
+
+const idSchema = Joi.string()
+  .guid({ version: ["uuidv4"] })
+  .required()
+  .messages({
+    "string.guid": "Please provide a valid ID.",
+    "any.required": "ID is required.",
+    "string.empty": "ID is required.",
+  });
+
+const optionalIdSchema = Joi.string()
+  .guid({ version: ["uuidv4"] })
+  .allow("", null)
+  .optional()
+  .messages({
+    "string.guid": "Please provide a valid ID.",
+  });
 
 const daySchema = Joi.string()
   .trim()
@@ -24,6 +45,7 @@ const optionalTimeSchema = Joi.string()
   .trim()
   .max(80)
   .allow("", null)
+  .optional()
   .messages({
     "string.max": "Period time cannot exceed 80 characters.",
   });
@@ -36,10 +58,11 @@ const optionalTimeSchema = Joi.string()
 
 export const timetableQuerySchema = Joi.object({
   classId: idSchema.messages({
+    "string.guid": "Please provide a valid class ID.",
     "any.required": "Class ID is required.",
     "string.empty": "Class ID is required.",
   }),
-});
+}).required();
 
 /*
 |--------------------------------------------------------------------------
@@ -49,17 +72,19 @@ export const timetableQuerySchema = Joi.object({
 
 export const periodParamsSchema = Joi.object({
   periodId: idSchema.messages({
+    "string.guid": "Please provide a valid period ID.",
     "any.required": "Period ID is required.",
     "string.empty": "Period ID is required.",
   }),
-});
+}).required();
 
 export const lessonParamsSchema = Joi.object({
   lessonId: idSchema.messages({
+    "string.guid": "Please provide a valid lesson ID.",
     "any.required": "Lesson ID is required.",
     "string.empty": "Lesson ID is required.",
   }),
-});
+}).required();
 
 /*
 |--------------------------------------------------------------------------
@@ -80,21 +105,23 @@ export const createPeriodSchema = Joi.object({
       "any.required": "Period name is required.",
     }),
 
-  time: optionalTimeSchema.optional(),
-}).required();
+  time: optionalTimeSchema,
+})
+  .required();
 
 export const updatePeriodSchema = Joi.object({
   name: Joi.string()
     .trim()
     .min(1)
     .max(60)
+    .optional()
     .messages({
       "string.empty": "Period name cannot be empty.",
       "string.min": "Period name is required.",
       "string.max": "Period name cannot exceed 60 characters.",
     }),
 
-  time: optionalTimeSchema.optional(),
+  time: optionalTimeSchema,
 })
   .min(1)
   .required();
@@ -107,11 +134,13 @@ export const updatePeriodSchema = Joi.object({
 
 export const createLessonSchema = Joi.object({
   classId: idSchema.messages({
+    "string.guid": "Please provide a valid class ID.",
     "any.required": "Class ID is required.",
     "string.empty": "Class ID is required.",
   }),
 
   periodId: idSchema.messages({
+    "string.guid": "Please provide a valid period ID.",
     "any.required": "Period ID is required.",
     "string.empty": "Period ID is required.",
   }),
@@ -119,29 +148,33 @@ export const createLessonSchema = Joi.object({
   dayOfWeek: daySchema.required(),
 
   subjectId: idSchema.messages({
+    "string.guid": "Please provide a valid subject ID.",
     "any.required": "Subject ID is required.",
     "string.empty": "Subject ID is required.",
   }),
 
-  teacherId: Joi.string()
-    .trim()
-    .allow("", null)
-    .optional(),
-}).required();
+  teacherId: optionalIdSchema,
+})
+  .required();
 
 export const updateLessonSchema = Joi.object({
-  classId: Joi.string().trim(),
-
-  periodId: Joi.string().trim(),
+  periodId: Joi.string()
+    .guid({ version: ["uuidv4"] })
+    .optional()
+    .messages({
+      "string.guid": "Please provide a valid period ID.",
+    }),
 
   dayOfWeek: daySchema.optional(),
 
-  subjectId: Joi.string().trim(),
+  subjectId: Joi.string()
+    .guid({ version: ["uuidv4"] })
+    .optional()
+    .messages({
+      "string.guid": "Please provide a valid subject ID.",
+    }),
 
-  teacherId: Joi.string()
-    .trim()
-    .allow("", null)
-    .optional(),
+  teacherId: optionalIdSchema,
 })
   .min(1)
   .required();

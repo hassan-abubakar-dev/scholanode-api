@@ -30,6 +30,11 @@ const SubscriptionPlan = dbConnection.define(
       defaultValue: "FREE",
     },
 
+    tierId: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+
     // Billing cycle
     // MONTHLY
     // TERMLY

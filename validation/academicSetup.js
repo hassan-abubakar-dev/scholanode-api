@@ -102,6 +102,16 @@ const classItemSchema = Joi.object({
       "string.min": "Class arm must be at least 1 character.",
       "string.max": "Class arm cannot exceed 50 characters.",
     }),
+
+  educationSection: Joi.string()
+    .trim()
+    .uppercase()
+    .valid("EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY")
+    .optional()
+    .messages({
+      "any.only":
+        "Educational section must be EARLY_YEARS, PRIMARY, JUNIOR_SECONDARY, or SENIOR_SECONDARY.",
+    }),
 }).required();
 
 export const createClassSchema = Joi.alternatives()
@@ -117,8 +127,6 @@ export const createClassSchema = Joi.alternatives()
     "array.max": "You cannot create more than 100 classes at once.",
     "any.required": "Class data is required.",
   });
-
-
 
 const singleSubjectSchema = Joi.object({
   subjectName: Joi.string()

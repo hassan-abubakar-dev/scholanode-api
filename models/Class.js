@@ -37,13 +37,31 @@ const Class = dbConnection.define(
     // Blue
     // Science
     // Commercial
-   arm: {
+    arm: {
       type: DataTypes.STRING(50),
       allowNull: true,
-        validate: {
-          len: [1, 50],
+      validate: {
+        len: [1, 50],
+      },
+    },
+
+    // Educational section grouping
+    educationSection: {
+      type: DataTypes.ENUM(
+        "EARLY_YEARS",
+        "PRIMARY",
+        "JUNIOR_SECONDARY",
+        "SENIOR_SECONDARY"
+      ),
+      allowNull: false,
+      defaultValue: "PRIMARY",
+      validate: {
+        isIn: {
+          args: [["EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY"]],
+          msg: "Invalid educational section.",
         },
-},
+      },
+    },
 
     // Assigned class teacher
     formMasterId: {

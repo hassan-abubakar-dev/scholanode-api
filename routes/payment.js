@@ -4,6 +4,7 @@ import {
   getPaymentStatus,
 } from "../controllers/payment.js";
 import validate from "../middleware/validation.js";
+import { authorize, protectRoutes } from "../middleware/auth.js";
 import {
   initializePaymentParamSchema,
   initializePaymentBodySchema,
@@ -18,6 +19,8 @@ const router = express.Router();
 
 router.post(
   "/schools/:schoolId/initialize",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(initializePaymentParamSchema, "params"),
   validate(initializePaymentBodySchema, "body"),
   initializePayment
@@ -29,6 +32,8 @@ router.post(
 
 router.get(
   "/:reference/status",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(paymentStatusParamSchema, "params"),
   getPaymentStatus
 );

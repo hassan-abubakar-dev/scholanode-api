@@ -1,5 +1,11 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Class, User, Student } from "../relationships/associations.js";
+import { Class, User, Student, Session, Term, AttendanceRegister, ClassSubject, TimetableLesson, SubjectAssignment } from "../relationships/associations.js";
+import {
+  canonicalizeClassLevel,
+  canonicalizeArm,
+  inferEducationSection,
+  normalizeOrInferEducationSection,
+} from "../utils/classCanonical.js";
 import AppError from "../utils/AppError.js";
 import {dbConnection} from "../config/db.js";
 import { Op } from "sequelize";
@@ -260,5 +266,353 @@ export const assignFormMaster = async (req, res, next) => {
     });
   } catch (error) {
     return handleControllerError(error, next, req, "CLASS_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+const ACADEMIC_TIME_ZONE = "Africa/Lagos";
+
+const lagosDateKey = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: ACADEMIC_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+
+export const getMyClassDetails = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+
+    if (!schoolId || !userId) {
+      return next(new AppError("Authenticated school or user not found.", 401));
+    }
+
+    const { classId } = req.query;
+    let targetClass = null;
+
+    if (classId && ["LEADER", "VICE_LEADER", "ADMINISTRATOR"].includes(role)) {
+      targetClass = await Class.findOne({
+        where: { id: classId, schoolId },
+        include: [
+          {
+            model: User,
+            as: "formMaster",
+            attributes: ["id", "firstName", "surName", "email"],
+            required: false,
+          },
+        ],
+      });
+    } else {
+      targetClass = await Class.findOne({
+        where: { schoolId, formMasterId: userId },
+        include: [
+          {
+            model: User,
+            as: "formMaster",
+            attributes: ["id", "firstName", "surName", "email"],
+            required: false,
+          },
+        ],
+      });
+    }
+
+    if (!targetClass) {
+      return res.status(404).json({
+        success: false,
+        message: "No class assigned to you as Form Master.",
+        data: null,
+      });
+    }
+
+    // Current Academic Session and Term
+    const currentSession = await Session.findOne({
+      where: { schoolId, status: "ACTIVE", isCurrent: true },
+    });
+
+    const currentTerm = currentSession
+      ? await Term.findOne({
+          where: { sessionId: currentSession.id, status: "ACTIVE", isCurrent: true },
+        })
+      : null;
+
+    // Students in this class
+    const students = await Student.findAll({
+      where: { schoolId, currentClassId: targetClass.id },
+      attributes: [
+        "id",
+        "userId",
+        "admissionNumber",
+        "gender",
+        "dateOfBirth",
+        "enrollmentDate",
+        "admissionStatus",
+        "qrToken",
+        "createdAt",
+      ],
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["firstName", "surName", "status", "profileImageKey"],
+          required: true,
+        },
+      ],
+      order: [
+        ["admissionNumber", "ASC"],
+        ["createdAt", "ASC"],
+      ],
+    });
+
+    // Today's attendance
+    const todayStr = lagosDateKey();
+    const todayRegister = await AttendanceRegister.findOne({
+      where: {
+        schoolId,
+        classId: targetClass.id,
+        attendanceDate: todayStr,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Class details retrieved successfully.",
+      data: {
+        class: {
+          id: targetClass.id,
+          classLevel: targetClass.classLevel,
+          arm: targetClass.arm,
+        },
+        academicPeriod: {
+          sessionName: currentSession?.sessionName || "Active Session",
+          termName: currentTerm?.termName || "Active Term",
+        },
+        formMaster: targetClass.formMaster
+          ? {
+              id: targetClass.formMaster.id,
+              firstName: targetClass.formMaster.firstName,
+              surName: targetClass.formMaster.surName,
+              email: targetClass.formMaster.email,
+            }
+          : {
+              id: req.user.id,
+              firstName: req.user.firstName,
+              surName: req.user.surName,
+              email: req.user.email,
+            },
+        attendanceToday: {
+          attendanceDate: todayStr,
+          isMarked: Boolean(todayRegister),
+          status: todayRegister?.status || "NOT_STARTED",
+          presentCount: todayRegister?.presentCount || 0,
+          absentCount: todayRegister?.absentCount || 0,
+          totalStudents: students.length,
+          percentage:
+            students.length > 0 && todayRegister?.presentCount
+              ? Math.round((todayRegister.presentCount / students.length) * 100)
+              : 0,
+        },
+        students: students.map((s) => ({
+          id: s.id,
+          name: `${s.user?.firstName || ""} ${s.user?.surName || ""}`.trim(),
+          firstName: s.user?.firstName,
+          surName: s.user?.surName,
+          admissionNo: s.admissionNumber,
+          gender: s.gender === "MALE" ? "Male" : "Female",
+          rawGender: s.gender,
+          status: s.admissionStatus,
+          qrToken: s.qrToken,
+          profileImageKey: s.user?.profileImageKey,
+          dateOfBirth: s.dateOfBirth,
+        })),
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "CLASS_CONTROLLER_ERROR",
+      "Unable to process this request. Please try again."
+    );
+  }
+};
+
+
+// Update a class (level, arm, educational section)
+export const updateClass = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const { classId } = req.params;
+    const { classLevel, arm, educationSection } = req.body;
+
+    if (!schoolId) {
+      return next(new AppError("Authenticated school not found.", 401));
+    }
+
+    if (!classId) {
+      return next(new AppError("Class ID is required.", 400));
+    }
+
+    const classRecord = await Class.findOne({
+      where: {
+        id: classId,
+        schoolId,
+      },
+    });
+
+    if (!classRecord) {
+      return next(new AppError("Class record not found for this school.", 404));
+    }
+
+    const canonicalLevel =
+      classLevel !== undefined
+        ? canonicalizeClassLevel(classLevel)
+        : classRecord.classLevel;
+
+    const canonicalArm =
+      arm !== undefined ? canonicalizeArm(arm) : classRecord.arm;
+
+    const canonicalSection =
+      educationSection !== undefined
+        ? normalizeOrInferEducationSection(educationSection, canonicalLevel)
+        : (classRecord.educationSection || inferEducationSection(canonicalLevel));
+
+    if (!canonicalLevel) {
+      return next(new AppError("Class level cannot be empty.", 400));
+    }
+
+    // Check duplicate collision in the same school
+    const existingDuplicate = await Class.findOne({
+      where: {
+        schoolId,
+        classLevel: canonicalLevel,
+        arm: canonicalArm,
+        id: { [Op.ne]: classId },
+      },
+    });
+
+    if (existingDuplicate) {
+      return next(
+        new AppError(
+          `A class with level "${canonicalLevel}" and arm "${canonicalArm || 'ungrouped'}" already exists for this school.`,
+          409
+        )
+      );
+    }
+
+    classRecord.classLevel = canonicalLevel;
+    classRecord.arm = canonicalArm;
+    classRecord.educationSection = canonicalSection;
+    await classRecord.save();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Class updated successfully.",
+      data: {
+        class: classRecord,
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "UPDATE_CLASS_ERROR",
+      "Unable to update this class. Please try again."
+    );
+  }
+};
+
+// Delete a class (with safety checks for enrolled students and attendance)
+export const deleteClass = async (req, res, next) => {
+  let transaction;
+
+  try {
+    const schoolId = req.user?.schoolId;
+    const { classId } = req.params;
+
+    if (!schoolId) {
+      return next(new AppError("Authenticated school not found.", 401));
+    }
+
+    if (!classId) {
+      return next(new AppError("Class ID is required.", 400));
+    }
+
+    const classRecord = await Class.findOne({
+      where: {
+        id: classId,
+        schoolId,
+      },
+    });
+
+    if (!classRecord) {
+      return next(new AppError("Class record not found for this school.", 404));
+    }
+
+    // 1. Check if students are currently enrolled in this class
+    const studentCount = await Student.count({
+      where: {
+        currentClassId: classId,
+      },
+    });
+
+    if (studentCount > 0) {
+      return next(
+        new AppError(
+          `Cannot delete "${classRecord.classLevel}${classRecord.arm ? ` · ${classRecord.arm}` : ''}". There are currently ${studentCount} student(s) enrolled in this class. Please reassign or transfer students before deleting, or use Edit to update the class details.`,
+          400
+        )
+      );
+    }
+
+    // 2. Check if attendance registers exist for this class
+    const attendanceCount = await AttendanceRegister.count({
+      where: {
+        classId,
+      },
+    });
+
+    if (attendanceCount > 0) {
+      return next(
+        new AppError(
+          `Cannot delete "${classRecord.classLevel}${classRecord.arm ? ` · ${classRecord.arm}` : ''}" because daily attendance records are attached to it. Renaming is recommended to preserve attendance history.`,
+          400
+        )
+      );
+    }
+
+    // 3. Clean up junction/dependent entries and delete atomically
+    transaction = await dbConnection.transaction();
+
+    if (ClassSubject) {
+      await ClassSubject.destroy({ where: { classId }, transaction });
+    }
+    if (TimetableLesson) {
+      await TimetableLesson.destroy({ where: { classId }, transaction });
+    }
+    if (SubjectAssignment) {
+      await SubjectAssignment.destroy({ where: { classId }, transaction });
+    }
+
+    await classRecord.destroy({ transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      status: "success",
+      message: "Class deleted successfully.",
+    });
+  } catch (error) {
+    if (transaction) await transaction.rollback();
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "DELETE_CLASS_ERROR",
+      "Unable to delete this class. Please try again."
+    );
   }
 };

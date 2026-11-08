@@ -14,15 +14,13 @@ export const initializePaymentBodySchema = Joi.object({
     "any.required": "Email is required.",
   }),
 
-  plan: Joi.string().trim().uppercase().valid("FREE", "STARTER", "STANDARD", "PROFESSIONAL").required().messages({
+  plan: Joi.string().trim().uppercase().valid("STARTER", "STANDARD", "PROFESSIONAL").required().messages({
     "string.empty": "Plan is required.",
-    "any.only": "Plan must be FREE, STARTER, STANDARD, or PROFESSIONAL.",
+    "any.only": "Plan must be STARTER, STANDARD, or PROFESSIONAL.",
     "any.required": "Plan is required.",
   }),
 
-  tierId: Joi.alternatives()
-    .try(Joi.string().trim(), Joi.number().integer())
-    .required()
+  tierId: Joi.string().trim().required()
     .messages({
       "any.required": "Tier ID is required.",
     }),
