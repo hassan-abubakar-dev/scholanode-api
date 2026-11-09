@@ -283,63 +283,108 @@ export const getMyClassDetails = async (req, res, next) => {
   try {
     const schoolId = req.user?.schoolId;
     const userId = req.user?.id;
-    const role = req.user?.role;
 
     if (!schoolId || !userId) {
-      return next(new AppError("Authenticated school or user not found.", 401));
+      return next(
+        new AppError("Authenticated school or user not found.", 401)
+      );
     }
 
-    const { classId } = req.query;
-    let targetClass = null;
+    // =========================================
+    // 1. VERIFY ACTIVE FORM MASTER
+    // =========================================
 
-    if (classId && ["LEADER", "VICE_LEADER", "ADMINISTRATOR"].includes(role)) {
-      targetClass = await Class.findOne({
-        where: { id: classId, schoolId },
-        include: [
-          {
-            model: User,
-            as: "formMaster",
-            attributes: ["id", "firstName", "surName", "email"],
-            required: false,
-          },
-        ],
-      });
-    } else {
-      targetClass = await Class.findOne({
-        where: { schoolId, formMasterId: userId },
-        include: [
-          {
-            model: User,
-            as: "formMaster",
-            attributes: ["id", "firstName", "surName", "email"],
-            required: false,
-          },
-        ],
-      });
+    const formMasterUser = await User.findOne({
+      where: {
+        id: userId,
+        schoolId,
+        role: "STAFF",
+        status: "ACTIVE",
+      },
+      attributes: ["id", "firstName", "surName", "email"],
+    });
+
+    if (!formMasterUser) {
+      return next(
+        new AppError(
+          "Only active staff members can access My Class.",
+          403
+        )
+      );
     }
 
-    if (!targetClass) {
-      return res.status(404).json({
-        success: false,
-        message: "No class assigned to you as Form Master.",
-        data: null,
-      });
+    // =========================================
+    // 2. FIND ASSIGNED CLASS
+    // =========================================
+
+    const assignedClasses = await Class.findAll({
+      where: {
+        schoolId,
+        formMasterId: userId,
+      },
+      include: [
+        {
+          model: User,
+          as: "formMaster",
+          attributes: ["id", "firstName", "surName", "email"],
+          required: false,
+        },
+      ],
+    });
+
+    if (assignedClasses.length === 0) {
+      return next(
+        new AppError(
+          "You are not currently assigned as a Form Master to any class.",
+          403
+        )
+      );
     }
 
-    // Current Academic Session and Term
+    if (assignedClasses.length > 1) {
+      return next(
+        new AppError(
+          "You are assigned to multiple classes. Please contact your school administrator to resolve this assignment.",
+          409
+        )
+      );
+    }
+
+    const targetClass = assignedClasses[0];
+
+    // =========================================
+    // 3. CURRENT ACADEMIC SESSION AND TERM
+    // =========================================
+
     const currentSession = await Session.findOne({
-      where: { schoolId, status: "ACTIVE", isCurrent: true },
+      where: {
+        schoolId,
+        status: "ACTIVE",
+        isCurrent: true,
+      },
     });
 
     const currentTerm = currentSession
       ? await Term.findOne({
-          where: { sessionId: currentSession.id, status: "ACTIVE", isCurrent: true },
+          where: {
+            schoolId,
+            sessionId: currentSession.id,
+            status: "ACTIVE",
+            isCurrent: true,
+          },
         })
       : null;
 
-    // Students in this class
+    // =========================================
+    // 4. GET ACTIVE STUDENTS
+    // =========================================
+
     const students = await Student.findAll({
-      where: { schoolId, currentClassId: targetClass.id },
+      where: {
+        schoolId,
+        currentClassId: targetClass.id,
+        admissionStatus: "ACTIVE",
+      },
       attributes: [
         "id",
         "userId",
@@ -355,7 +400,12 @@ export const getMyClassDetails = async (req, res, next) => {
         {
           model: User,
           as: "user",
-          attributes: ["firstName", "surName", "status", "profileImageKey"],
+          attributes: [
+            "firstName",
+            "surName",
+            "status",
+            "profileImageKey",
+          ],
           required: true,
         },
       ],
@@ -365,8 +415,12 @@ export const getMyClassDetails = async (req, res, next) => {
       ],
     });
 
-    // Today's attendance
+    // =========================================
+    // 5. GET TODAY'S ATTENDANCE REGISTER
+    // =========================================
+
     const todayStr = lagosDateKey();
+
     const todayRegister = await AttendanceRegister.findOne({
       where: {
         schoolId,
@@ -375,19 +429,71 @@ export const getMyClassDetails = async (req, res, next) => {
       },
     });
 
+    // =========================================
+    // 6. CALCULATE ATTENDANCE COUNTS
+    // =========================================
+
+    let presentCount = 0;
+    let absentCount = 0;
+    let unconfirmedCount = 0;
+
+    if (todayRegister) {
+      const [present, absent, unconfirmed] = await Promise.all([
+        AttendanceRecord.count({
+          where: {
+            attendanceRegisterId: todayRegister.id,
+            status: "PRESENT",
+          },
+        }),
+
+        AttendanceRecord.count({
+          where: {
+            attendanceRegisterId: todayRegister.id,
+            status: "ABSENT",
+          },
+        }),
+
+        AttendanceRecord.count({
+          where: {
+            attendanceRegisterId: todayRegister.id,
+            status: null,
+          },
+        }),
+      ]);
+
+      presentCount = present;
+      absentCount = absent;
+      unconfirmedCount = unconfirmed;
+    }
+
+    const totalStudents = students.length;
+    const confirmedCount = presentCount + absentCount;
+
+    const attendancePercentage =
+      confirmedCount > 0
+        ? Math.round((presentCount / confirmedCount) * 100)
+        : 0;
+
+    // =========================================
+    // 7. RESPONSE
+    // =========================================
+
     return res.status(200).json({
       success: true,
       message: "Class details retrieved successfully.",
+
       data: {
         class: {
           id: targetClass.id,
           classLevel: targetClass.classLevel,
           arm: targetClass.arm,
         },
+
         academicPeriod: {
-          sessionName: currentSession?.sessionName || "Active Session",
-          termName: currentTerm?.termName || "Active Term",
+          sessionName: currentSession?.sessionName || null,
+          termName: currentTerm?.termName || null,
         },
+
         formMaster: targetClass.formMaster
           ? {
               id: targetClass.formMaster.id,
@@ -395,35 +501,51 @@ export const getMyClassDetails = async (req, res, next) => {
               surName: targetClass.formMaster.surName,
               email: targetClass.formMaster.email,
             }
-          : {
-              id: req.user.id,
-              firstName: req.user.firstName,
-              surName: req.user.surName,
-              email: req.user.email,
-            },
+          : null,
+
         attendanceToday: {
           attendanceDate: todayStr,
           isMarked: Boolean(todayRegister),
+
           status: todayRegister?.status || "NOT_STARTED",
-          presentCount: todayRegister?.presentCount || 0,
-          absentCount: todayRegister?.absentCount || 0,
-          totalStudents: students.length,
-          percentage:
-            students.length > 0 && todayRegister?.presentCount
-              ? Math.round((todayRegister.presentCount / students.length) * 100)
-              : 0,
+
+          presentCount,
+          absentCount,
+          unconfirmedCount,
+
+          confirmedCount,
+          totalStudents,
+
+          percentage: attendancePercentage,
         },
+
         students: students.map((s) => ({
           id: s.id,
-          name: `${s.user?.firstName || ""} ${s.user?.surName || ""}`.trim(),
+
+          name: `${s.user?.firstName || ""} ${
+            s.user?.surName || ""
+          }`.trim(),
+
           firstName: s.user?.firstName,
           surName: s.user?.surName,
+
           admissionNo: s.admissionNumber,
-          gender: s.gender === "MALE" ? "Male" : "Female",
+
+          gender:
+            s.gender === "MALE"
+              ? "Male"
+              : s.gender === "FEMALE"
+                ? "Female"
+                : "Not specified",
+
           rawGender: s.gender,
+
           status: s.admissionStatus,
+
           qrToken: s.qrToken,
+
           profileImageKey: s.user?.profileImageKey,
+
           dateOfBirth: s.dateOfBirth,
         })),
       },

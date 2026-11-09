@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { School, User, Session, Term, Class, Subject, Owner, VerificationCode } from "../relationships/associations.js";
+import { School, User, Session, Term, Class, Subject, Owner, VerificationCode, WorkingDay } from "../relationships/associations.js";
 import {
   canonicalizeClassLevel,
   canonicalizeArm,
@@ -326,6 +326,11 @@ export const registerSchool = async (req, res, next) => {
       {
         transaction,
       }
+    );
+
+    await WorkingDay.create(
+      { schoolId: newSchool.id },
+      { transaction }
     );
 
     // Generate the ID inside the same transaction that creates the user.

@@ -1,6 +1,6 @@
 import express from "express";
 
-import { createStudent, getAllStudents, importStudents } from "../controllers/student.js";
+import { createStudent, getAllStudents, importStudents, getMyClass } from "../controllers/student.js";
 import { authorize, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import { createStudentValidationSchema, getAllStudentsQueryValidationSchema, importStudentsSchema } from "../validation/student.js";
@@ -29,6 +29,13 @@ router.post(
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(importStudentsSchema),
   importStudents
+);
+
+router.get(
+  "/my-class",
+  protectRoutes,
+  authorize("STUDENT"),
+  getMyClass
 );
 
 export default router;

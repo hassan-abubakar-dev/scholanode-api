@@ -50,6 +50,15 @@ const optionalTimeSchema = Joi.string()
     "string.max": "Period time cannot exceed 80 characters.",
   });
 
+const optionalSearchSchema = Joi.string()
+  .trim()
+  .max(100)
+  .allow("")
+  .optional()
+  .messages({
+    "string.max": "Search text cannot exceed 100 characters.",
+  });
+
 /*
 |--------------------------------------------------------------------------
 | Query Parameters
@@ -62,6 +71,50 @@ export const timetableQuerySchema = Joi.object({
     "any.required": "Class ID is required.",
     "string.empty": "Class ID is required.",
   }),
+}).required();
+
+export const adminTimetableSearchSchema = Joi.object({
+  search: optionalSearchSchema,
+
+  classLevel: Joi.string()
+    .trim()
+    .max(20)
+    .allow("")
+    .optional()
+    .messages({
+      "string.max": "Class level cannot exceed 20 characters.",
+    }),
+
+  arm: Joi.string()
+    .trim()
+    .max(50)
+    .allow("")
+    .optional()
+    .messages({
+      "string.max": "Class arm cannot exceed 50 characters.",
+    }),
+
+  page: Joi.number()
+    .integer()
+    .min(1)
+    .default(1)
+    .messages({
+      "number.base": "Page must be a number.",
+      "number.integer": "Page must be a whole number.",
+      "number.min": "Page must be at least 1.",
+    }),
+
+  limit: Joi.number()
+    .integer()
+    .min(1)
+    .max(100)
+    .default(20)
+    .messages({
+      "number.base": "Limit must be a number.",
+      "number.integer": "Limit must be a whole number.",
+      "number.min": "Limit must be at least 1.",
+      "number.max": "Limit cannot exceed 100.",
+    }),
 }).required();
 
 /*
@@ -106,8 +159,7 @@ export const createPeriodSchema = Joi.object({
     }),
 
   time: optionalTimeSchema,
-})
-  .required();
+}).required();
 
 export const updatePeriodSchema = Joi.object({
   name: Joi.string()
@@ -154,8 +206,7 @@ export const createLessonSchema = Joi.object({
   }),
 
   teacherId: optionalIdSchema,
-})
-  .required();
+}).required();
 
 export const updateLessonSchema = Joi.object({
   periodId: Joi.string()

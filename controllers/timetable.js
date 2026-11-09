@@ -1,4 +1,6 @@
 import PDFDocument from "pdfkit";
+import { Op } from "sequelize";
+
 import {
   School,
   Class,
@@ -10,10 +12,10 @@ import {
   Student,
   Parent,
   ParentStudent,
+  ClassSubject,
 } from "../relationships/associations.js";
 
 import { dbConnection } from "../config/db.js";
-import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import { handleControllerError } from "../utils/controllerError.js";
 
@@ -38,7 +40,6 @@ const PERIOD_MANAGEMENT_ROLES = [
   "LEADER",
   "VICE_LEADER",
   "ADMINISTRATOR",
-  "STAFF",
 ];
 
 const TEACHER_ROLES = [
@@ -49,9 +50,50 @@ const TEACHER_ROLES = [
   "STAFF",
 ];
 
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+const handleTimetableError = (error, next, req) => {
+  const constraint =
+    error?.constraint ||
+    error?.parent?.constraint ||
+    error?.index ||
+    error?.parent?.index;
+  const conflictFields = Object.keys(error?.fields || {});
+  const isLessonConflict =
+    constraint === "unique_timetable_lesson_slot" ||
+    constraint === "unique_timetable_teacher_period" ||
+    (conflictFields.includes("schoolId") &&
+      conflictFields.includes("periodId") &&
+      conflictFields.includes("dayOfWeek") &&
+      (conflictFields.includes("classId") ||
+        conflictFields.includes("teacherId")));
+
+  if (
+    error?.name === "SequelizeUniqueConstraintError" &&
+    isLessonConflict
+  ) {
+    return next(
+      new AppError(
+        "The selected class slot or teacher schedule conflicts with another lesson.",
+        409
+      )
+    );
+  }
+
+  return handleControllerError(
+    error,
+    next,
+    req,
+    "TIMETABLE_CONTROLLER_ERROR",
+    "Unable to process the timetable request."
+  );
+};
+
 /*
 |--------------------------------------------------------------------------
-| Shared Helpers
+| General Helpers
 |--------------------------------------------------------------------------
 */
 
@@ -59,7 +101,7 @@ const getSchoolId = (req) => {
   const schoolId = req.user?.schoolId;
 
   if (!schoolId) {
-    throw new AppError("Authenticated school not found.", 401);
+    throw new AppError("School information could not be identified.", 403);
   }
 
   return schoolId;
@@ -74,13 +116,14 @@ const requireRole = (req, allowedRoles) => {
   }
 };
 
-const getWorkingDays = async (schoolId, transaction) => {
-  const config = await WorkingDay.findOne({
+const getWorkingDays = async (schoolId, transaction = undefined) => {
+  const record = await WorkingDay.findOne({
     where: { schoolId },
+    attributes: ["days"],
     transaction,
   });
 
-  return Array.isArray(config?.days) ? config.days : [];
+  return Array.isArray(record?.days) ? record.days : [];
 };
 
 const validateWorkingDay = (dayOfWeek, workingDays) => {
@@ -90,7 +133,7 @@ const validateWorkingDay = (dayOfWeek, workingDays) => {
 
   if (!workingDays.includes(dayOfWeek)) {
     throw new AppError(
-      `${dayOfWeek} is not configured as a working day for this school.`,
+      "This day is not configured as a working day for your school.",
       400
     );
   }
@@ -99,15 +142,18 @@ const validateWorkingDay = (dayOfWeek, workingDays) => {
 const ensureClassBelongsToSchool = async (
   classId,
   schoolId,
-  transaction
+  transaction = undefined
 ) => {
   const schoolClass = await Class.findOne({
-    where: { id: classId, schoolId },
+    where: {
+      id: classId,
+      schoolId,
+    },
     transaction,
   });
 
   if (!schoolClass) {
-    throw new AppError("Class not found for this school.", 404);
+    throw new AppError("Class not found.", 404);
   }
 
   return schoolClass;
@@ -116,10 +162,13 @@ const ensureClassBelongsToSchool = async (
 const ensurePeriodBelongsToSchool = async (
   periodId,
   schoolId,
-  transaction
+  transaction = undefined
 ) => {
   const period = await TimetablePeriod.findOne({
-    where: { id: periodId, schoolId },
+    where: {
+      id: periodId,
+      schoolId,
+    },
     transaction,
   });
 
@@ -130,27 +179,47 @@ const ensurePeriodBelongsToSchool = async (
   return period;
 };
 
-const ensureSubjectBelongsToSchool = async (
+const ensureSubjectBelongsToClass = async ({
   subjectId,
+  classId,
   schoolId,
-  transaction
-) => {
-  const subject = await Subject.findOne({
-    where: { id: subjectId, schoolId },
+  transaction,
+}) => {
+  const classSubject = await ClassSubject.findOne({
+    where: {
+      schoolId,
+      classId,
+      subjectId,
+    },
+    include: [
+      {
+        model: Subject,
+        as: "subject",
+        required: true,
+        where: {
+          schoolId,
+          isActive: true,
+        },
+        attributes: ["id", "subjectName", "isActive"],
+      },
+    ],
     transaction,
   });
 
-  if (!subject) {
-    throw new AppError("Subject not found for this school.", 404);
+  if (!classSubject) {
+    throw new AppError(
+      "This subject is not active or has not been assigned to this class.",
+      400
+    );
   }
 
-  return subject;
+  return classSubject.subject;
 };
 
 const ensureTeacherBelongsToSchool = async (
   teacherId,
   schoolId,
-  transaction
+  transaction = undefined
 ) => {
   if (!teacherId) return null;
 
@@ -158,15 +227,19 @@ const ensureTeacherBelongsToSchool = async (
     where: {
       id: teacherId,
       schoolId,
-      role: { [Op.in]: TEACHER_ROLES },
+      role: {
+        [Op.in]: TEACHER_ROLES,
+      },
+      status: "ACTIVE",
     },
+    attributes: ["id", "firstName", "surName", "role", "status"],
     transaction,
   });
 
   if (!teacher) {
     throw new AppError(
-      "The selected teacher is not an eligible staff member of this school.",
-      404
+      "The selected teacher is not an active eligible staff member of this school.",
+      400
     );
   }
 
@@ -175,158 +248,285 @@ const ensureTeacherBelongsToSchool = async (
 
 /*
 |--------------------------------------------------------------------------
-| Class Access Authorization
+| Authorization Helpers
 |--------------------------------------------------------------------------
 */
 
-// Form Masters can manage only the class currently assigned to them.
 const ensureFormMasterAccess = async (
   user,
-  schoolClass
+  schoolClass,
+  transaction = undefined
 ) => {
-  if (ADMIN_VIEW_ROLES.includes(user?.role)) {
-    return;
-  }
-  if (
-    user?.role !== "STAFF" ||
-    schoolClass.formMasterId !== user.id
-  ) {
+  const activeStaff = await User.findOne({
+    where: {
+      id: user.id,
+      schoolId: user.schoolId,
+      role: "STAFF",
+      status: "ACTIVE",
+    },
+    attributes: ["id"],
+    transaction,
+  });
+
+  if (!activeStaff || schoolClass.formMasterId !== user.id) {
     throw new AppError(
-      "You are not the assigned Form Master for this class.",
+      "Only the Form Master assigned to this class can configure its timetable.",
       403
+    );
+  }
+
+  // Enforce the same one-class Form Master rule used by My Class.
+  const assignedClasses = await Class.count({
+    where: {
+      schoolId: user.schoolId,
+      formMasterId: user.id,
+    },
+    transaction,
+  });
+
+  if (assignedClasses !== 1) {
+    throw new AppError(
+      "Your Form Master assignment must be resolved before configuring a timetable.",
+      409
     );
   }
 };
 
-// Determines whether a user can view a particular class timetable.
-const ensureCanViewClass = async (
-  req,
-  schoolClass,
-  schoolId
-) => {
+const ensureCanViewClass = async (req, schoolClass, schoolId) => {
   const user = req.user;
 
-  // School leadership and Exam Officer can view all class timetables.
   if (ADMIN_VIEW_ROLES.includes(user.role)) {
-    return;
+    return {
+      canConfigure: false,
+      accessRole: "ADMIN",
+    };
   }
 
-  // Form Masters can view their assigned class.
-  if (user.role === "STAFF") {
-    if (schoolClass.formMasterId === user.id) {
-      return;
-    }
-
-    throw new AppError(
-      "You are not authorized to view this class timetable.",
-      403
-    );
-  }
-
-  // Students can view only their current class timetable.
-  if (user.role === "STUDENT") {
-    const student = await Student.findOne({
+  if (
+    user.role === "STAFF" &&
+    schoolClass.formMasterId === user.id
+  ) {
+    const activeStaff = await User.findOne({
       where: {
+        id: user.id,
         schoolId,
-        userId: user.id,
+        role: "STAFF",
+        status: "ACTIVE",
       },
+      attributes: ["id"],
     });
 
-    if (
-      !student ||
-      !student.currentClassId ||
-      student.currentClassId !== schoolClass.id
-    ) {
-      throw new AppError(
-        "You can only view the timetable for your current class.",
-        403
-      );
-    }
-
-    return;
-  }
-
-  // Parents can view a timetable if they have a linked child
-  // currently registered in the requested class.
-  if (user.role === "PARENT") {
-    const parent = await Parent.findOne({
-      where: {
-        schoolId,
-        userId: user.id,
-      },
-    });
-
-    if (!parent) {
-      throw new AppError("Parent record not found.", 404);
-    }
-
-    const relationship = await ParentStudent.findOne({
-      where: {
-        parentId: parent.id,
-      },
-      include: [
-        {
-          model: Student,
-          as: "student",
-          where: {
-            schoolId,
-            currentClassId: schoolClass.id,
-          },
-          required: true,
-        },
-      ],
-    });
-
-    if (!relationship) {
+    if (!activeStaff) {
       throw new AppError(
         "You are not authorized to view this class timetable.",
         403
       );
     }
 
-    return;
+    const assignedClasses = await Class.count({
+      where: {
+        schoolId,
+        formMasterId: user.id,
+      },
+    });
+
+    if (assignedClasses !== 1) {
+      throw new AppError(
+        "Your Form Master assignment must be resolved before configuring a timetable.",
+        409
+      );
+    }
+
+    return {
+      canConfigure: true,
+      accessRole: "FORM_MASTER",
+    };
+  }
+
+  if (user.role === "STUDENT") {
+    const student = await Student.findOne({
+      where: {
+        userId: user.id,
+        schoolId,
+        currentClassId: schoolClass.id,
+        admissionStatus: "ACTIVE",
+      },
+      attributes: ["id"],
+    });
+
+    if (student) {
+      return {
+        canConfigure: false,
+        accessRole: "STUDENT",
+      };
+    }
+  }
+
+  if (user.role === "PARENT") {
+    const parent = await Parent.findOne({
+      where: {
+        userId: user.id,
+        schoolId,
+      },
+      attributes: ["id"],
+    });
+
+    if (parent) {
+      const relationship = await ParentStudent.findOne({
+        where: {
+          parentId: parent.id,
+          schoolId,
+        },
+        include: [
+          {
+            model: Student,
+            as: "student",
+            required: true,
+            where: {
+              schoolId,
+              currentClassId: schoolClass.id,
+              admissionStatus: "ACTIVE",
+            },
+            attributes: ["id"],
+          },
+        ],
+      });
+
+      if (relationship) {
+        return {
+          canConfigure: false,
+          accessRole: "PARENT",
+        };
+      }
+    }
   }
 
   throw new AppError(
-    "You are not authorized to view timetables.",
+    "You are not authorized to view this class timetable.",
     403
-  );
-};
-
-const handleTimetableError = (error, next, req) => {
-  if (
-    error.name === "SequelizeUniqueConstraintError" ||
-    error.name === "SequelizeExclusionConstraintError"
-  ) {
-    return next(
-      new AppError(
-        "This timetable entry conflicts with an existing record.",
-        409
-      )
-    );
-  }
-
-  return handleControllerError(
-    error,
-    next,
-    req,
-    "TIMETABLE_CONTROLLER_ERROR",
-    "Unable to process this request. Please try again."
   );
 };
 
 /*
 |--------------------------------------------------------------------------
-| Get Timetable
+| Timetable Query Helpers
+|--------------------------------------------------------------------------
+*/
+
+const getClassTimetableData = async (schoolClass, schoolId) => {
+  const [workingDays, periods, lessons] = await Promise.all([
+    getWorkingDays(schoolId),
+
+    TimetablePeriod.findAll({
+      where: { schoolId },
+      order: [
+        ["orderIndex", "ASC"],
+        ["createdAt", "ASC"],
+      ],
+    }),
+
+    TimetableLesson.findAll({
+      where: {
+        schoolId,
+        classId: schoolClass.id,
+      },
+      include: [
+        {
+          model: TimetablePeriod,
+          as: "period",
+          attributes: ["id", "name", "time", "orderIndex"],
+          required: true,
+        },
+        {
+          model: Subject,
+          as: "subject",
+          attributes: ["id", "subjectName"],
+          required: true,
+        },
+        {
+          model: User,
+          as: "teacher",
+          attributes: ["id", "firstName", "surName"],
+          required: false,
+        },
+      ],
+    }),
+  ]);
+
+  const dayOrder = new Map(
+    VALID_DAYS.map((day, index) => [day, index])
+  );
+
+  lessons.sort((a, b) => {
+    const dayDifference =
+      dayOrder.get(a.dayOfWeek) - dayOrder.get(b.dayOfWeek);
+
+    if (dayDifference !== 0) return dayDifference;
+
+    return (
+      (a.period?.orderIndex ?? 0) -
+      (b.period?.orderIndex ?? 0)
+    );
+  });
+
+  return {
+    workingDays,
+    periods,
+    lessons,
+  };
+};
+
+const getFormMasterOptions = async (schoolClass, schoolId) => {
+  const [classSubjects, teachers] = await Promise.all([
+    ClassSubject.findAll({
+      where: {
+        schoolId,
+        classId: schoolClass.id,
+      },
+      include: [
+        {
+          model: Subject,
+          as: "subject",
+          required: true,
+          where: {
+            schoolId,
+            isActive: true,
+          },
+          attributes: ["id", "subjectName"],
+        },
+      ],
+      order: [[{ model: Subject, as: "subject" }, "subjectName", "ASC"]],
+    }),
+
+    User.findAll({
+      where: {
+        schoolId,
+        role: {
+          [Op.in]: TEACHER_ROLES,
+        },
+        status: "ACTIVE",
+      },
+      attributes: ["id", "firstName", "surName", "role"],
+      order: [
+        ["firstName", "ASC"],
+        ["surName", "ASC"],
+      ],
+    }),
+  ]);
+
+  return {
+    subjects: classSubjects.map((item) => item.subject),
+    teachers,
+  };
+};
+
+/*
+|--------------------------------------------------------------------------
+| View Class Timetable
 |--------------------------------------------------------------------------
 */
 
 // GET /api/timetable?classId=<classId>
-//
-// Leadership and Exam Officer: any class.
-// Form Master: assigned class only.
-// Student: current class only.
-// Parent: class of a linked child.
 
 export const getTimetable = async (req, res, next) => {
   try {
@@ -338,93 +538,28 @@ export const getTimetable = async (req, res, next) => {
       schoolId
     );
 
-    await ensureCanViewClass(req, schoolClass, schoolId);
+    const access = await ensureCanViewClass(
+      req,
+      schoolClass,
+      schoolId
+    );
 
-    const isFormMaster =
-      req.user.role === "STAFF" &&
-      schoolClass.formMasterId === req.user.id;
+    const timetable = await getClassTimetableData(
+      schoolClass,
+      schoolId
+    );
 
-    const [
-      workingDays,
-      periods,
-      lessons,
-      subjects,
-      teachers,
-    ] = await Promise.all([
-      getWorkingDays(schoolId),
+    let options = {
+      subjects: [],
+      teachers: [],
+    };
 
-      TimetablePeriod.findAll({
-        where: { schoolId },
-        order: [
-          ["orderIndex", "ASC"],
-          ["createdAt", "ASC"],
-        ],
-      }),
-
-      TimetableLesson.findAll({
-        where: {
-          schoolId,
-          classId,
-        },
-        include: [
-          {
-            model: TimetablePeriod,
-            as: "period",
-          },
-          {
-            model: Subject,
-            as: "subject",
-          },
-          {
-            model: User,
-            as: "teacher",
-            attributes: ["id", "firstName", "surName"],
-            required: false,
-          },
-        ],
-      }),
-
-      isFormMaster
-        ? Subject.findAll({
-            where: { schoolId },
-            order: [["createdAt", "ASC"]],
-          })
-        : Promise.resolve([]),
-
-      isFormMaster
-        ? User.findAll({
-            where: {
-              schoolId,
-              role: { [Op.in]: TEACHER_ROLES },
-            },
-            attributes: ["id", "firstName", "surName", "role"],
-            order: [
-              ["firstName", "ASC"],
-              ["surName", "ASC"],
-            ],
-          })
-        : Promise.resolve([]),
-    ]);
-
-    // Use the configured working-day order and period order.
-    const dayOrder = workingDays.length > 0
-      ? workingDays
-      : VALID_DAYS;
-
-    lessons.sort((a, b) => {
-      const dayDifference =
-        dayOrder.indexOf(a.dayOfWeek) -
-        dayOrder.indexOf(b.dayOfWeek);
-
-      if (dayDifference !== 0) {
-        return dayDifference;
-      }
-
-      return (
-        (a.period?.orderIndex ?? 0) -
-        (b.period?.orderIndex ?? 0)
+    if (access.canConfigure) {
+      options = await getFormMasterOptions(
+        schoolClass,
+        schoolId
       );
-    });
+    }
 
     return res.status(200).json({
       success: true,
@@ -434,40 +569,208 @@ export const getTimetable = async (req, res, next) => {
           id: schoolClass.id,
           classLevel: schoolClass.classLevel,
           arm: schoolClass.arm,
+          formMasterId: schoolClass.formMasterId,
         },
-        workingDays,
-        periods,
-        lessons,
-        subjects,
-        teachers,
+        access: {
+          role: access.accessRole,
+          canConfigure: access.canConfigure,
+        },
+        workingDays: timetable.workingDays,
+        periods: timetable.periods,
+        lessons: timetable.lessons,
+        subjects: options.subjects,
+        teachers: options.teachers,
       },
     });
   } catch (error) {
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
 /*
 |--------------------------------------------------------------------------
-| Create Period
+| School Working Days
 |--------------------------------------------------------------------------
 */
 
-// Shared school-wide period configuration.
-// Only leadership and administrators can manage periods.
+// GET /api/timetable/working-days
+
+export const getSchoolWorkingDays = async (req, res, next) => {
+  try {
+    const schoolId = getSchoolId(req);
+
+    const days = await getWorkingDays(schoolId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Working days retrieved successfully.",
+      data: {
+        days,
+        isConfigured: days.length > 0,
+      },
+    });
+  } catch (error) {
+    handleTimetableError(error, next, req);
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| Administrative Class Search
+|--------------------------------------------------------------------------
+*/
+
+// GET /api/timetable/admin/classes
+
+export const searchClassesForTimetable = async (req, res, next) => {
+  try {
+    const schoolId = getSchoolId(req);
+
+   requireRole(req, ADMIN_VIEW_ROLES);
+
+    const {
+      search,
+      classLevel,
+      arm,
+      page = DEFAULT_PAGE,
+      limit = DEFAULT_LIMIT,
+    } = req.query;
+
+    const currentPage = Math.max(1, Number(page) || DEFAULT_PAGE);
+    const pageSize = Math.min(
+      MAX_LIMIT,
+      Math.max(1, Number(limit) || DEFAULT_LIMIT)
+    );
+
+    const where = { schoolId };
+
+    if (classLevel) {
+      where.classLevel = {
+        [Op.like]: `%${classLevel}%`,
+      };
+    }
+
+    if (arm) {
+      where.arm = {
+        [Op.like]: `%${arm}%`,
+      };
+    }
+
+    if (search) {
+      const searchValue = `%${search}%`;
+
+      where[Op.or] = [
+        { classLevel: { [Op.like]: searchValue } },
+        { arm: { [Op.like]: searchValue } },
+      ];
+    }
+
+    const { rows, count } = await Class.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "classLevel",
+        "arm",
+        "educationSection",
+        "formMasterId",
+      ],
+      include: [
+        {
+          model: User,
+          as: "formMaster",
+          required: false,
+          attributes: [
+            "id",
+            "firstName",
+            "surName",
+            "status",
+          ],
+        },
+        {
+          model: TimetableLesson,
+          as: "timetableLessons",
+          required: false,
+          attributes: ["id"],
+        },
+      ],
+      distinct: true,
+      limit: pageSize,
+      offset: (currentPage - 1) * pageSize,
+      order: [
+        ["educationSection", "ASC"],
+        ["classLevel", "ASC"],
+        ["arm", "ASC"],
+      ],
+    });
+
+    const classes = rows.map((item) => {
+      const schoolClass = item.toJSON();
+      const lessonCount = schoolClass.timetableLessons?.length ?? 0;
+
+      return {
+        id: schoolClass.id,
+        classLevel: schoolClass.classLevel,
+        arm: schoolClass.arm,
+        educationSection: schoolClass.educationSection,
+
+        formMaster: schoolClass.formMaster
+          ? {
+              id: schoolClass.formMaster.id,
+              firstName: schoolClass.formMaster.firstName,
+              surName: schoolClass.formMaster.surName,
+              status: schoolClass.formMaster.status,
+            }
+          : null,
+
+        hasFormMaster: Boolean(schoolClass.formMasterId),
+        hasTimetable: lessonCount > 0,
+        lessonCount,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Classes retrieved successfully.",
+      data: {
+        classes,
+        pagination: {
+          total: count,
+          page: currentPage,
+          limit: pageSize,
+          totalPages: Math.ceil(count / pageSize),
+          hasNextPage: currentPage * pageSize < count,
+          hasPreviousPage: currentPage > 1,
+        },
+      },
+    });
+  } catch (error) {
+    handleTimetableError(error, next, req);
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| Period Management
+|--------------------------------------------------------------------------
+*/
+
+// POST /api/timetable/periods
 
 export const createPeriod = async (req, res, next) => {
-  try {
-    requireRole(req, PERIOD_MANAGEMENT_ROLES);
+  const transaction = await dbConnection.transaction();
 
+  try {
     const schoolId = getSchoolId(req);
+    requireRole(PERIOD_MANAGEMENT_ROLES);
+
     const { name, time } = req.body;
 
     const existingPeriod = await TimetablePeriod.findOne({
       where: {
         schoolId,
-        name: name.trim(),
+        name,
       },
+      transaction,
     });
 
     if (existingPeriod) {
@@ -477,67 +780,65 @@ export const createPeriod = async (req, res, next) => {
       );
     }
 
-    const lastPeriod = await TimetablePeriod.findOne({
+    const highestOrder = await TimetablePeriod.max("orderIndex", {
       where: { schoolId },
-      order: [["orderIndex", "DESC"]],
+      transaction,
     });
 
-    const orderIndex = lastPeriod
-      ? lastPeriod.orderIndex + 1
-      : 0;
+    const period = await TimetablePeriod.create(
+      {
+        schoolId,
+        name,
+        time: time ?? null,
+        orderIndex:
+          highestOrder === null || highestOrder === undefined
+            ? 0
+            : highestOrder + 1,
+      },
+      { transaction }
+    );
 
-    const period = await TimetablePeriod.create({
-      schoolId,
-      name: name.trim(),
-      time: time?.trim() || null,
-      orderIndex,
-    });
+    await transaction.commit();
 
     return res.status(201).json({
       success: true,
       message: "Timetable period created successfully.",
-      data: { period },
+      data: period,
     });
   } catch (error) {
-    return handleTimetableError(error, next, req);
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
+
+    handleTimetableError(error, next, req);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Update Period
-|--------------------------------------------------------------------------
-*/
+// PATCH /api/timetable/periods/:periodId
 
 export const updatePeriod = async (req, res, next) => {
   try {
-    requireRole(req, PERIOD_MANAGEMENT_ROLES);
-
     const schoolId = getSchoolId(req);
+    requireRole(PERIOD_MANAGEMENT_ROLES);
+
     const { periodId } = req.params;
     const { name, time } = req.body;
 
-    const period = await TimetablePeriod.findOne({
-      where: {
-        id: periodId,
-        schoolId,
-      },
-    });
+    const period = await ensurePeriodBelongsToSchool(
+      periodId,
+      schoolId
+    );
 
-    if (!period) {
-      throw new AppError("Timetable period not found.", 404);
-    }
-
-    if (name !== undefined) {
-      const duplicatePeriod = await TimetablePeriod.findOne({
+    if (name !== undefined && name !== period.name) {
+      const duplicate = await TimetablePeriod.findOne({
         where: {
           schoolId,
-          name: name.trim(),
+          name,
           id: { [Op.ne]: period.id },
         },
       });
 
-      if (duplicatePeriod) {
+      if (duplicate) {
         throw new AppError(
           "A timetable period with this name already exists.",
           409
@@ -545,125 +846,99 @@ export const updatePeriod = async (req, res, next) => {
       }
     }
 
-    const updates = {};
+    if (name !== undefined) period.name = name;
+    if (time !== undefined) period.time = time || null;
 
-    if (name !== undefined) {
-      updates.name = name.trim();
-    }
-
-    if (time !== undefined) {
-      updates.time = time?.trim() || null;
-    }
-
-    await period.update(updates);
+    await period.save();
 
     return res.status(200).json({
       success: true,
       message: "Timetable period updated successfully.",
-      data: { period },
+      data: period,
     });
   } catch (error) {
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Delete Period
-|--------------------------------------------------------------------------
-*/
-
-// Deleting a shared period deletes its lessons across all classes.
-// All operations happen in one transaction.
+// DELETE /api/timetable/periods/:periodId
 
 export const deletePeriod = async (req, res, next) => {
-  let transaction;
+  const transaction = await dbConnection.transaction();
 
   try {
-    requireRole(req, PERIOD_MANAGEMENT_ROLES);
-
-    transaction = await dbConnection.transaction();
-
     const schoolId = getSchoolId(req);
+    requireRole(PERIOD_MANAGEMENT_ROLES);
+
     const { periodId } = req.params;
 
-    const period = await TimetablePeriod.findOne({
+    const period = await ensurePeriodBelongsToSchool(
+      periodId,
+      schoolId,
+      transaction
+    );
+
+    const lessonsUsingPeriod = await TimetableLesson.count({
       where: {
-        id: periodId,
         schoolId,
+        periodId,
       },
       transaction,
-      lock: transaction.LOCK.UPDATE,
     });
 
-    if (!period) {
-      throw new AppError("Timetable period not found.", 404);
+    if (lessonsUsingPeriod > 0) {
+      throw new AppError(
+        `This period is currently used by ${lessonsUsingPeriod} timetable lesson(s). Remove or reassign those lessons before deleting the period.`,
+        409
+      );
     }
-
-    const deletedLessonCount = await TimetableLesson.destroy({
-      where: {
-        schoolId,
-        periodId: period.id,
-      },
-      transaction,
-    });
 
     await period.destroy({ transaction });
 
-    const remainingPeriods = await TimetablePeriod.findAll({
-      where: { schoolId },
-      order: [
-        ["orderIndex", "ASC"],
-        ["createdAt", "ASC"],
-      ],
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-
-    for (let index = 0; index < remainingPeriods.length; index++) {
-      if (remainingPeriods[index].orderIndex !== index) {
-        await remainingPeriods[index].update(
-          { orderIndex: index },
-          { transaction }
-        );
+    await TimetablePeriod.update(
+      {
+        orderIndex: dbConnection.literal("orderIndex - 1"),
+      },
+      {
+        where: {
+          schoolId,
+          orderIndex: {
+            [Op.gt]: period.orderIndex,
+          },
+        },
+        transaction,
       }
-    }
+    );
 
     await transaction.commit();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Timetable period and its associated lessons deleted successfully.",
-      data: {
-        deletedPeriodId: period.id,
-        deletedLessonCount,
-      },
+      message: "Timetable period deleted successfully.",
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
+    if (!transaction.finished) {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
 /*
 |--------------------------------------------------------------------------
-| Create Lesson
+| Lesson Management
 |--------------------------------------------------------------------------
 */
 
-// Only the assigned Form Master can create a lesson for a class.
+// POST /api/timetable/lessons
 
 export const createLesson = async (req, res, next) => {
-  let transaction;
+  const transaction = await dbConnection.transaction();
 
   try {
-    transaction = await dbConnection.transaction();
-
     const schoolId = getSchoolId(req);
+
     const {
       classId,
       periodId,
@@ -678,19 +953,16 @@ export const createLesson = async (req, res, next) => {
       transaction
     );
 
-    await ensureFormMasterAccess(req.user, schoolClass);
+    await ensureFormMasterAccess(
+      req.user,
+      schoolClass,
+      transaction
+    );
 
     const workingDays = await getWorkingDays(
       schoolId,
       transaction
     );
-
-    if (workingDays.length === 0) {
-      throw new AppError(
-        "Please configure the school's working days before creating a timetable.",
-        400
-      );
-    }
 
     validateWorkingDay(dayOfWeek, workingDays);
 
@@ -700,19 +972,20 @@ export const createLesson = async (req, res, next) => {
       transaction
     );
 
-    await ensureSubjectBelongsToSchool(
+    const subject = await ensureSubjectBelongsToClass({
       subjectId,
+      classId,
       schoolId,
-      transaction
-    );
+      transaction,
+    });
 
-    await ensureTeacherBelongsToSchool(
+    const teacher = await ensureTeacherBelongsToSchool(
       teacherId,
       schoolId,
       transaction
     );
 
-    const existingLesson = await TimetableLesson.findOne({
+    const duplicateSlot = await TimetableLesson.findOne({
       where: {
         schoolId,
         classId,
@@ -722,11 +995,30 @@ export const createLesson = async (req, res, next) => {
       transaction,
     });
 
-    if (existingLesson) {
+    if (duplicateSlot) {
       throw new AppError(
-        "This class already has a lesson assigned to that day and period.",
+        "A lesson already exists for this class, day, and period.",
         409
       );
+    }
+
+    if (teacher) {
+      const teacherConflict = await TimetableLesson.findOne({
+        where: {
+          schoolId,
+          teacherId,
+          periodId,
+          dayOfWeek,
+        },
+        transaction,
+      });
+
+      if (teacherConflict) {
+        throw new AppError(
+          "This teacher is already assigned to another class during this period.",
+          409
+        );
+      }
     }
 
     const lesson = await TimetableLesson.create(
@@ -735,8 +1027,8 @@ export const createLesson = async (req, res, next) => {
         classId,
         periodId,
         dayOfWeek,
-        subjectId,
-        teacherId: teacherId || null,
+        subjectId: subject.id,
+        teacherId: teacher?.id ?? null,
       },
       { transaction }
     );
@@ -749,8 +1041,16 @@ export const createLesson = async (req, res, next) => {
         schoolId,
       },
       include: [
-        { model: TimetablePeriod, as: "period" },
-        { model: Subject, as: "subject" },
+        {
+          model: TimetablePeriod,
+          as: "period",
+          attributes: ["id", "name", "time", "orderIndex"],
+        },
+        {
+          model: Subject,
+          as: "subject",
+          attributes: ["id", "subjectName"],
+        },
         {
           model: User,
           as: "teacher",
@@ -763,41 +1063,25 @@ export const createLesson = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: "Timetable lesson created successfully.",
-      data: { lesson: createdLesson },
+      data: createdLesson,
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
+    if (!transaction.finished) {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Update Lesson
-|--------------------------------------------------------------------------
-*/
-
-// A Form Master can update only lessons belonging to their assigned class.
-// A lesson cannot be moved to another class through this endpoint.
+// PATCH /api/timetable/lessons/:lessonId
 
 export const updateLesson = async (req, res, next) => {
-  let transaction;
+  const transaction = await dbConnection.transaction();
 
   try {
-    transaction = await dbConnection.transaction();
-
     const schoolId = getSchoolId(req);
     const { lessonId } = req.params;
-
-    const {
-      periodId,
-      dayOfWeek,
-      subjectId,
-      teacherId,
-    } = req.body;
 
     const lesson = await TimetableLesson.findOne({
       where: {
@@ -805,7 +1089,6 @@ export const updateLesson = async (req, res, next) => {
         schoolId,
       },
       transaction,
-      lock: transaction.LOCK.UPDATE,
     });
 
     if (!lesson) {
@@ -818,30 +1101,40 @@ export const updateLesson = async (req, res, next) => {
       transaction
     );
 
-    await ensureFormMasterAccess(req.user, schoolClass);
+    await ensureFormMasterAccess(
+      req.user,
+      schoolClass,
+      transaction
+    );
 
-    const nextPeriodId = periodId ?? lesson.periodId;
-    const nextDayOfWeek = dayOfWeek ?? lesson.dayOfWeek;
-    const nextSubjectId = subjectId ?? lesson.subjectId;
+    const nextPeriodId =
+      req.body.periodId ?? lesson.periodId;
 
-    const nextTeacherId =
-      teacherId === undefined
-        ? lesson.teacherId
-        : teacherId;
+    const nextDay =
+      req.body.dayOfWeek ?? lesson.dayOfWeek;
+
+    const subjectChanged = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "subjectId"
+    );
+    const nextSubjectId = subjectChanged
+      ? req.body.subjectId
+      : lesson.subjectId;
+
+    const teacherChanged = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "teacherId"
+    );
+    const nextTeacherId = teacherChanged
+      ? req.body.teacherId
+      : lesson.teacherId;
 
     const workingDays = await getWorkingDays(
       schoolId,
       transaction
     );
 
-    if (workingDays.length === 0) {
-      throw new AppError(
-        "Please configure the school's working days before updating a timetable.",
-        400
-      );
-    }
-
-    validateWorkingDay(nextDayOfWeek, workingDays);
+    validateWorkingDay(nextDay, workingDays);
 
     await ensurePeriodBelongsToSchool(
       nextPeriodId,
@@ -849,45 +1142,69 @@ export const updateLesson = async (req, res, next) => {
       transaction
     );
 
-    await ensureSubjectBelongsToSchool(
-      nextSubjectId,
-      schoolId,
-      transaction
-    );
+    if (subjectChanged) {
+      await ensureSubjectBelongsToClass({
+        subjectId: nextSubjectId,
+        classId: lesson.classId,
+        schoolId,
+        transaction,
+      });
+    }
 
-    await ensureTeacherBelongsToSchool(
-      nextTeacherId,
-      schoolId,
-      transaction
-    );
+    const teacher = teacherChanged
+      ? await ensureTeacherBelongsToSchool(
+          nextTeacherId,
+          schoolId,
+          transaction
+        )
+      : null;
 
-    const conflictingLesson = await TimetableLesson.findOne({
+    const duplicateSlot = await TimetableLesson.findOne({
       where: {
         schoolId,
         classId: lesson.classId,
         periodId: nextPeriodId,
-        dayOfWeek: nextDayOfWeek,
+        dayOfWeek: nextDay,
         id: { [Op.ne]: lesson.id },
       },
       transaction,
     });
 
-    if (conflictingLesson) {
+    if (duplicateSlot) {
       throw new AppError(
-        "This class already has a lesson assigned to that day and period.",
+        "Another lesson already occupies this class, day, and period.",
         409
       );
     }
 
-    await lesson.update(
-      {
-        periodId: nextPeriodId,
-        dayOfWeek: nextDayOfWeek,
-        subjectId: nextSubjectId,
-        teacherId: nextTeacherId || null,
-      },
-      { transaction }
-    );
+    if (nextTeacherId) {
+      const teacherConflict = await TimetableLesson.findOne({
+        where: {
+          schoolId,
+          teacherId: nextTeacherId,
+          periodId: nextPeriodId,
+          dayOfWeek: nextDay,
+          id: { [Op.ne]: lesson.id },
+        },
+        transaction,
+      });
+
+      if (teacherConflict) {
+        throw new AppError(
+          "This teacher is already assigned to another class during this period.",
+          409
+        );
+      }
+    }
+
+    lesson.periodId = nextPeriodId;
+    lesson.dayOfWeek = nextDay;
+    lesson.subjectId = nextSubjectId;
+    if (teacherChanged) {
+      lesson.teacherId = teacher?.id ?? null;
+    }
+
+    await lesson.save({ transaction });
 
     await transaction.commit();
 
@@ -897,8 +1214,16 @@ export const updateLesson = async (req, res, next) => {
         schoolId,
       },
       include: [
-        { model: TimetablePeriod, as: "period" },
-        { model: Subject, as: "subject" },
+        {
+          model: TimetablePeriod,
+          as: "period",
+          attributes: ["id", "name", "time", "orderIndex"],
+        },
+        {
+          model: Subject,
+          as: "subject",
+          attributes: ["id", "subjectName"],
+        },
         {
           model: User,
           as: "teacher",
@@ -911,31 +1236,23 @@ export const updateLesson = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Timetable lesson updated successfully.",
-      data: { lesson: updatedLesson },
+      data: updatedLesson,
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
+    if (!transaction.finished) {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Delete Lesson
-|--------------------------------------------------------------------------
-*/
-
-// Only the assigned Form Master can delete a lesson.
+// DELETE /api/timetable/lessons/:lessonId
 
 export const deleteLesson = async (req, res, next) => {
-  let transaction;
+  const transaction = await dbConnection.transaction();
 
   try {
-    transaction = await dbConnection.transaction();
-
     const schoolId = getSchoolId(req);
     const { lessonId } = req.params;
 
@@ -945,7 +1262,6 @@ export const deleteLesson = async (req, res, next) => {
         schoolId,
       },
       transaction,
-      lock: transaction.LOCK.UPDATE,
     });
 
     if (!lesson) {
@@ -958,7 +1274,11 @@ export const deleteLesson = async (req, res, next) => {
       transaction
     );
 
-    await ensureFormMasterAccess(req.user, schoolClass);
+    await ensureFormMasterAccess(
+      req.user,
+      schoolClass,
+      transaction
+    );
 
     await lesson.destroy({ transaction });
 
@@ -967,97 +1287,69 @@ export const deleteLesson = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Timetable lesson deleted successfully.",
-      data: {
-        deletedLessonId: lesson.id,
-      },
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
+    if (!transaction.finished) {
       await transaction.rollback();
     }
 
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };
 
 /*
 |--------------------------------------------------------------------------
-| Get School Working Days
+| Timetable PDF
 |--------------------------------------------------------------------------
 */
 
-export const getSchoolWorkingDays = async (req, res, next) => {
-  try {
-    const schoolId = getSchoolId(req);
-    const workingDays = await getWorkingDays(schoolId);
-
-    return res.status(200).json({
-      success: true,
-      message: "Working days retrieved successfully.",
-      data: {
-        workingDays: workingDays.length > 0 ? workingDays : VALID_DAYS,
-      },
-    });
-  } catch (error) {
-    return handleTimetableError(error, next, req);
-  }
-};
-
-/*
-|--------------------------------------------------------------------------
-| Generate Timetable PDF (PDFKit)
-|--------------------------------------------------------------------------
-*/
+// GET /api/timetable/pdf?classId=<classId>
 
 export const generateTimetablePdf = async (req, res, next) => {
   try {
     const schoolId = getSchoolId(req);
     const { classId } = req.query;
 
-    const schoolClass = await ensureClassBelongsToSchool(classId, schoolId);
+    const schoolClass = await ensureClassBelongsToSchool(
+      classId,
+      schoolId
+    );
+
     await ensureCanViewClass(req, schoolClass, schoolId);
 
-    const [school, workingDays, periods, lessons] = await Promise.all([
-      School.findByPk(schoolId),
-      getWorkingDays(schoolId),
-      TimetablePeriod.findAll({
-        where: { schoolId },
-        order: [
-          ["orderIndex", "ASC"],
-          ["createdAt", "ASC"],
-        ],
+    const [school, timetable] = await Promise.all([
+      School.findOne({
+        where: { id: schoolId },
+        attributes: ["id", "schoolName"],
       }),
-      TimetableLesson.findAll({
-        where: { schoolId, classId },
-        include: [
-          { model: TimetablePeriod, as: "period" },
-          { model: Subject, as: "subject" },
-          {
-            model: User,
-            as: "teacher",
-            attributes: ["id", "firstName", "surName"],
-            required: false,
-          },
-        ],
-      }),
+
+      getClassTimetableData(schoolClass, schoolId),
     ]);
 
-    const activeDays = workingDays.length > 0 ? workingDays : VALID_DAYS;
+    const days = timetable.workingDays;
+    const periods = timetable.periods;
 
-    const doc = new PDFDocument({
-      size: "A4",
-      layout: "landscape",
-      margin: 30,
-      info: {
-        Title: `${schoolClass.classLevel} ${schoolClass.arm} Timetable`,
-        Author: school?.name || "ScholaNode",
-      },
-    });
+    const lessonMap = new Map();
+
+    for (const lesson of timetable.lessons) {
+      lessonMap.set(
+        `${lesson.dayOfWeek}:${lesson.periodId}`,
+        lesson
+      );
+    }
+
+    const className = [
+      schoolClass.classLevel,
+      schoolClass.arm,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const safeClassName = className.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+    const filename = `timetable_${safeClassName}.pdf`;
 
     const isDownload = req.query.download === "true";
-    const safeLevel = (schoolClass.classLevel || "").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const safeArm = (schoolClass.arm || "").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const filename = `${safeLevel}_${safeArm}_Timetable.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
@@ -1065,165 +1357,226 @@ export const generateTimetablePdf = async (req, res, next) => {
       `${isDownload ? "attachment" : "inline"}; filename="${filename}"`
     );
 
-    doc.pipe(res);
-
-    const primaryColor = "#071A52";
-    const accentColor = "#123A8F";
-    const lightBg = "#F8FAFC";
-    const borderColor = "#CBD5E1";
-    const mutedColor = "#64748B";
-
-    // Header title
-    const schoolName = (school?.name || "SCHOLANODE ACADEMY").toUpperCase();
-    doc
-      .fontSize(16)
-      .font("Helvetica-Bold")
-      .fillColor(primaryColor)
-      .text(schoolName, { align: "center" });
-
-    doc
-      .fontSize(12)
-      .font("Helvetica-Bold")
-      .fillColor(accentColor)
-      .text(`CLASS TIMETABLE: ${schoolClass.classLevel.toUpperCase()} ${schoolClass.arm ? "- " + schoolClass.arm.toUpperCase() : ""}`, {
-        align: "center",
-      });
-
-    doc.moveDown(0.5);
-
-    // Layout calculations
-    const startX = 30;
-    const startY = doc.y + 4;
-    const totalWidth = 842 - 60; // 782pt
-    const periodColWidth = Math.min(110, Math.floor(totalWidth * 0.15));
-    const dayColWidth = Math.floor((totalWidth - periodColWidth) / activeDays.length);
-    const headerHeight = 26;
-
-    // Header row background
-    doc.rect(startX, startY, totalWidth, headerHeight).fill(primaryColor);
-
-    // Period / Time header cell
-    doc
-      .fontSize(9)
-      .font("Helvetica-Bold")
-      .fillColor("#FFFFFF")
-      .text("TIME / PERIOD", startX + 4, startY + 8, {
-        width: periodColWidth - 8,
-        align: "center",
-      });
-
-    // Days header cells
-    activeDays.forEach((day, index) => {
-      const x = startX + periodColWidth + index * dayColWidth;
-      const formattedDay = day.charAt(0) + day.slice(1).toLowerCase();
-      doc.text(formattedDay, x + 4, startY + 8, {
-        width: dayColWidth - 8,
-        align: "center",
-      });
+    const doc = new PDFDocument({
+      size: "A4",
+      layout: "landscape",
+      margins: {
+        top: 35,
+        bottom: 35,
+        left: 35,
+        right: 35,
+      },
+      bufferPages: false,
     });
 
-    let currentY = startY + headerHeight;
-    const availableHeight = 520 - currentY;
-    const rowHeight = Math.max(38, Math.min(65, Math.floor(availableHeight / Math.max(periods.length, 1))));
+    doc.on("error", (error) => {
+      console.error("Timetable PDF generation error:", error);
+      if (!res.headersSent) {
+        next(error);
+      } else {
+        res.destroy(error);
+      }
+    });
 
-    periods.forEach((period, pIndex) => {
-      const isEven = pIndex % 2 === 0;
-      doc
-        .rect(startX, currentY, totalWidth, rowHeight)
-        .fill(isEven ? "#FFFFFF" : lightBg);
+    doc.pipe(res);
 
-      // Period Name & Time
+    const pageWidth =
+      doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+    const dayColumnWidth =
+      days.length > 0 ? pageWidth / (days.length + 1) : pageWidth;
+
+    const periodColumnWidth = dayColumnWidth;
+
+    const rowHeight = 52;
+    const headerHeight = 34;
+
+    const drawTableHeader = (y) => {
       doc
-        .fontSize(9)
         .font("Helvetica-Bold")
-        .fillColor(primaryColor)
-        .text(period.name, startX + 4, currentY + 6, {
-          width: periodColWidth - 8,
+        .fontSize(9)
+        .fillColor("#FFFFFF");
+
+      doc
+        .rect(
+          doc.page.margins.left,
+          y,
+          periodColumnWidth,
+          headerHeight
+        )
+        .fill("#123A8F");
+
+      doc
+        .fillColor("#FFFFFF")
+        .text("PERIOD", doc.page.margins.left + 5, y + 11, {
+          width: periodColumnWidth - 10,
           align: "center",
         });
 
-      if (period.time) {
+      days.forEach((day, index) => {
+        const x =
+          doc.page.margins.left +
+          periodColumnWidth +
+          index * dayColumnWidth;
+
         doc
-          .fontSize(7.5)
-          .font("Helvetica")
-          .fillColor(mutedColor)
-          .text(period.time, startX + 4, currentY + 20, {
-            width: periodColWidth - 8,
+          .rect(x, y, dayColumnWidth, headerHeight)
+          .fill("#123A8F");
+
+        doc
+          .fillColor("#FFFFFF")
+          .text(day, x + 3, y + 11, {
+            width: dayColumnWidth - 6,
             align: "center",
           });
+      });
+    };
+
+    const drawLessonCell = (lesson, x, y, width, height) => {
+      doc
+        .lineWidth(0.5)
+        .strokeColor("#CBD5E1")
+        .rect(x, y, width, height)
+        .stroke();
+
+      if (!lesson) return;
+
+      const subjectName =
+        lesson.subject?.subjectName ?? "Subject";
+
+      const teacherName = lesson.teacher
+        ? `${lesson.teacher.firstName} ${lesson.teacher.surName}`
+        : "";
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(8)
+        .fillColor("#071A52")
+        .text(subjectName, x + 4, y + 8, {
+          width: width - 8,
+          align: "center",
+          ellipsis: true,
+        });
+
+      if (teacherName) {
+        doc
+          .font("Helvetica")
+          .fontSize(7)
+          .fillColor("#475569")
+          .text(teacherName, x + 4, y + 24, {
+            width: width - 8,
+            align: "center",
+            ellipsis: true,
+          });
       }
+    };
 
-      // Lesson cells
-      activeDays.forEach((day, dIndex) => {
-        const x = startX + periodColWidth + dIndex * dayColWidth;
-        const lesson = lessons.find(
-          (l) => l.periodId === period.id && l.dayOfWeek === day
-        );
-
-        if (lesson) {
-          doc
-            .rect(x + 2, currentY + 2, dayColWidth - 4, rowHeight - 4)
-            .fillAndStroke("#EFF6FF", "#BFDBFE");
-
-          doc
-            .fontSize(8.5)
-            .font("Helvetica-Bold")
-            .fillColor(primaryColor)
-            .text(lesson.subject?.name || "Subject", x + 4, currentY + 6, {
-              width: dayColWidth - 8,
-              align: "center",
-              ellipsis: true,
-            });
-
-          const teacherName = lesson.teacher
-            ? `${lesson.teacher.firstName || ""} ${lesson.teacher.surName || ""}`.trim()
-            : "";
-
-          if (teacherName) {
-            doc
-              .fontSize(7)
-              .font("Helvetica")
-              .fillColor(mutedColor)
-              .text(teacherName, x + 4, currentY + 22, {
-                width: dayColWidth - 8,
-                align: "center",
-                ellipsis: true,
-              });
-          }
-        }
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(19)
+      .fillColor("#071A52")
+      .text(school?.schoolName || "School Timetable", {
+        align: "center",
       });
 
-      currentY += rowHeight;
-    });
+    doc.moveDown(0.35);
 
-    // Grid borders
     doc
-      .rect(startX, startY, totalWidth, currentY - startY)
-      .stroke(borderColor);
+      .font("Helvetica-Bold")
+      .fontSize(13)
+      .fillColor("#123A8F")
+      .text(`${className} - TIMETABLE`, {
+        align: "center",
+      });
 
-    for (let i = 1; i < activeDays.length + 1; i++) {
-      const lineX = startX + periodColWidth + (i - 1) * dayColWidth;
+    doc.moveDown(0.8);
+
+    let y = doc.y;
+
+    if (days.length === 0) {
       doc
-        .moveTo(lineX, startY)
-        .lineTo(lineX, currentY)
-        .stroke(borderColor);
-    }
+        .font("Helvetica")
+        .fontSize(11)
+        .fillColor("#475569")
+        .text(
+          "Working days have not been configured for this school.",
+          { align: "center" }
+        );
+    } else if (periods.length === 0) {
+      doc
+        .font("Helvetica")
+        .fontSize(11)
+        .fillColor("#475569")
+        .text(
+          "No timetable periods have been configured for this school.",
+          { align: "center" }
+        );
+    } else {
+      drawTableHeader(y);
+      y += headerHeight;
 
-    // Footer note
-    const footerY = 555;
-    doc
-      .fontSize(8)
-      .font("Helvetica")
-      .fillColor(mutedColor)
-      .text(
-        `Generated on ${new Date().toLocaleDateString(undefined, { dateStyle: "long" })} | ScholaNode School Management System`,
-        startX,
-        footerY,
-        { width: totalWidth, align: "center" }
-      );
+      for (const period of periods) {
+        if (y + rowHeight > doc.page.height - 40) {
+          doc.addPage();
+          y = doc.page.margins.top;
+          drawTableHeader(y);
+          y += headerHeight;
+        }
+
+        doc
+          .lineWidth(0.5)
+          .strokeColor("#CBD5E1")
+          .rect(
+            doc.page.margins.left,
+            y,
+            periodColumnWidth,
+            rowHeight
+          )
+          .stroke();
+
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .fillColor("#071A52")
+          .text(period.name, doc.page.margins.left + 5, y + 9, {
+            width: periodColumnWidth - 10,
+            align: "center",
+          });
+
+        if (period.time) {
+          doc
+            .font("Helvetica")
+            .fontSize(7)
+            .fillColor("#475569")
+            .text(period.time, doc.page.margins.left + 5, y + 26, {
+              width: periodColumnWidth - 10,
+              align: "center",
+            });
+        }
+
+        days.forEach((day, index) => {
+          const x =
+            doc.page.margins.left +
+            periodColumnWidth +
+            index * dayColumnWidth;
+
+          const lesson = lessonMap.get(`${day}:${period.id}`);
+
+          drawLessonCell(
+            lesson,
+            x,
+            y,
+            dayColumnWidth,
+            rowHeight
+          );
+        });
+
+        y += rowHeight;
+      }
+    }
 
     doc.end();
   } catch (error) {
-    return handleTimetableError(error, next, req);
+    handleTimetableError(error, next, req);
   }
 };

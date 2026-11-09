@@ -84,6 +84,11 @@ const TimetableLesson = dbConnection.define(
         name: "idx_timetable_lesson_teacher_day",
       },
       {
+        unique: true,
+        fields: ["schoolId", "teacherId", "dayOfWeek", "periodId"],
+        name: "unique_timetable_teacher_period",
+      },
+      {
         fields: ["schoolId", "subjectId"],
         name: "idx_timetable_lesson_school_subject",
       },

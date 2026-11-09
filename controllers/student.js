@@ -1,5 +1,14 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Student, User, Class, ParentStudent } from "../relationships/associations.js";
+import {
+  Student,
+  User,
+  Class,
+  ParentStudent,
+  Subject,
+  ClassSubject,
+} from "../relationships/associations.js";
+
+import AppError from "../utils/AppError.js";
 import bcrypt from "bcryptjs";
 import { dbConnection } from "../config/db.js";
 import { Op, fn, col, where as sequelizeWhere } from "sequelize";
@@ -696,5 +705,151 @@ export const importStudents = async (req, res, next) => {
     }
 
     return handleControllerError(error, next, req, "STUDENT_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+  }
+};
+
+
+export const getMyClass = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+    const schoolId = req.user?.schoolId;
+
+    if (!userId || !schoolId) {
+      return next(
+        new AppError("User authentication is required.", 401)
+      );
+    }
+
+    // Retrieve the authenticated student's profile and current class.
+    const student = await Student.findOne({
+      where: {
+        userId,
+        schoolId,
+      },
+      attributes: ["id", "currentClassId"],
+
+      include: [
+        {
+          model: Class,
+          as: "currentClass",
+          attributes: [
+            "id",
+            "classLevel",
+            "arm",
+            "educationSection",
+            "formMasterId",
+          ],
+          where: {
+            schoolId,
+          },
+          required: false,
+
+          include: [
+            // Assigned Form Master
+            {
+              model: User,
+              as: "formMaster",
+              attributes: [
+                "id",
+                "firstName",
+                "surName",
+                "profileImageKey",
+              ],
+              required: false,
+            },
+
+            // Subjects linked to this class
+            {
+              model: ClassSubject,
+              as: "classSubjects",
+              attributes: ["id"],
+              where: {
+                schoolId,
+              },
+              required: false,
+
+              include: [
+                {
+                  model: Subject,
+                  as: "subject",
+                  attributes: ["id", "subjectName"],
+                  where: {
+                    schoolId,
+                    isActive: true,
+                  },
+                  required: true,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!student) {
+      return next(
+        new AppError("Student profile not found.", 404)
+      );
+    }
+
+    const currentClass = student.currentClass;
+
+    // A student may not have been assigned to a class yet.
+    if (!currentClass) {
+      return res.status(200).json({
+        status: "success",
+        message: "You are not currently assigned to a class.",
+        data: {
+          class: null,
+        },
+      });
+    }
+
+    // Prepare Form Master information without exposing unnecessary user data.
+    let formMaster = null;
+
+    if (currentClass.formMaster) {
+      const imageUrl = currentClass.formMaster.profileImageKey
+        ? await getPrivateFileUrl(
+            currentClass.formMaster.profileImageKey
+          )
+        : null;
+
+      formMaster = {
+        id: currentClass.formMaster.id,
+        firstName: currentClass.formMaster.firstName,
+        surName: currentClass.formMaster.surName,
+        profileImageUrl: imageUrl,
+      };
+    }
+
+    // Return only the active subjects linked to this class.
+    const subjects = (currentClass.classSubjects || [])
+      .map((item) => item.subject)
+      .filter(Boolean)
+      .sort((a, b) =>
+        a.subjectName.localeCompare(b.subjectName)
+      )
+      .map((subject) => ({
+        id: subject.id,
+        subjectName: subject.subjectName,
+      }));
+
+    return res.status(200).json({
+      status: "success",
+      message: "Class details retrieved successfully.",
+      data: {
+        class: {
+          id: currentClass.id,
+          classLevel: currentClass.classLevel,
+          arm: currentClass.arm,
+          educationSection: currentClass.educationSection,
+          formMaster,
+          subjects,
+        },
+      },
+    });
+  } catch (error) {
+    handleControllerError(error, next);
   }
 };
