@@ -1,5 +1,7 @@
- const generateVerificationCode = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
+import { randomInt } from "crypto";
 
-  export default generateVerificationCode;
+const generateVerificationCode = () => {
+  return randomInt(100000, 1000000).toString();
+};
+
+export default generateVerificationCode;

@@ -38,6 +38,7 @@ import profileRouter from "./routes/profile.js";
 import announcementRouter from "./routes/announcement.js"
 import notificationRouter from "./routes/notification.js";
 import classSubjectRouter from "./routes/classSubject.js";
+import subscriptionRouter from "./routes/subscription.js";
 
 
 
@@ -150,6 +151,7 @@ app.use("/api/profiles", profileRouter)
 app.use("/api/announcements", announcementRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/class-subjects", classSubjectRouter);
+app.use("/api/subscriptions", subscriptionRouter);
 
 // error handle
 app.use(errorHandler);
@@ -194,7 +196,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         await testConnection();
 
         console.log("Synchronizing database models...");
-        await dbConnection.sync({alter: true});
+        await dbConnection.sync();
 
         console.log("Database connected and models synced successfully.");
 

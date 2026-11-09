@@ -388,17 +388,16 @@ export const registerSchool = async (req, res, next) => {
     const verificationCode = generateVerificationCode();
     const expiryTime = generateExpiryTime();
 
-    await VerificationCode.create(
-      {
-        code: verificationCode,
-        expiryTime,
-        userEmail: normalizedUserEmail,
-        purpose: "SCHOOL_REGISTRATION",
-      },
-      {
-        transaction,
-      }
-    );
+   await VerificationCode.create(
+  {
+    code: verificationCode,
+    expiryTime,
+    userEmail: normalizedUserEmail,
+    userId: newUser.id,
+    purpose: "SCHOOL_REGISTRATION",
+  },
+  { transaction }
+);
 
     // =========================================================
     // 18. CREATE VERIFICATION EMAIL
@@ -511,7 +510,7 @@ export const registerSchool = async (req, res, next) => {
             color: #777777;
             line-height: 1.6;
           ">
-            This verification code will expire shortly.
+            This code will expire in 10 minutes.
             If you did not register this school, please ignore this email.
           </p>
 
@@ -539,10 +538,6 @@ export const registerSchool = async (req, res, next) => {
       </div>
     `;
 
-    // Commit registration data before sending external email.
-    await transaction.commit();
-
-    let verificationEmailSent = true;
     try {
       await sendEmail({
         to: normalizedUserEmail,
@@ -557,14 +552,23 @@ export const registerSchool = async (req, res, next) => {
           error: emailError.message,
         }
       );
-      verificationEmailSent = false;
+      await rollbackTransaction(
+        transaction,
+        "REGISTER_SCHOOL_EMAIL_ROLLBACK_ERROR"
+      );
+
+      return res.status(500).json({
+        status: "error",
+        message:
+          "Registration could not be completed because the verification email could not be sent. Please try again.",
+      });
     }
+
+    await transaction.commit();
 
     return res.status(201).json({
       status: "success",
-      message: verificationEmailSent
-        ? `Registration successful. A verification code has been sent to ${normalizedUserEmail}.`
-        : "Registration successful, but the verification email could not be sent. Please request a new verification email.",
+      message: `Registration successful. A verification code has been sent to ${normalizedUserEmail}.`,
 
       data: {
         school: {

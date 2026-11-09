@@ -374,3 +374,150 @@ export const getPaymentStatus = async (req, res, next) => {
     );
   }
 };
+
+
+export const getPaymentHistory = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const { page = 1, limit = 10, status } = req.query;
+
+    if (!schoolId) {
+      throw new AppError("School information is missing.", 400);
+    }
+
+    const where = { schoolId };
+
+    if (status) {
+      where.status = status;
+    }
+
+    const pageNumber = Number(page);
+    const pageSize = Number(limit);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const { count, rows } = await Payment.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "reference",
+        "amount",
+        "currency",
+        "status",
+        "provider",
+        "paidAt",
+        "createdAt",
+        "metadata",
+      ],
+      order: [
+        ["createdAt", "DESC"],
+      ],
+      limit: pageSize,
+      offset,
+    });
+
+    const payments = rows.map((payment) => ({
+      id: payment.id,
+      reference: payment.reference,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: payment.status,
+      provider: payment.provider,
+      paidAt: payment.paidAt,
+      createdAt: payment.createdAt,
+      plan: payment.metadata?.plan || null,
+      tierId: payment.metadata?.tierId || null,
+      billingCycle: payment.metadata?.billingCycle || null,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment history retrieved successfully.",
+      data: {
+        payments,
+        pagination: {
+          totalItems: count,
+          currentPage: pageNumber,
+          pageSize,
+          totalPages: Math.ceil(count / pageSize),
+          hasNextPage: pageNumber * pageSize < count,
+          hasPreviousPage: pageNumber > 1,
+        },
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "GET_PAYMENT_HISTORY_ERROR",
+      "Unable to retrieve payment history."
+    );
+  }
+};
+
+export const getPaymentReceipt = async (req, res, next) => {
+  try {
+    const { paymentId } = req.params;
+    const schoolId = req.user?.schoolId;
+
+    const payment = await Payment.findOne({
+      where: {
+        id: paymentId,
+        schoolId,
+      },
+      attributes: [
+        "id",
+        "schoolId",
+        "reference",
+        "amount",
+        "currency",
+        "status",
+        "provider",
+        "providerTransactionId",
+        "paidAt",
+        "createdAt",
+        "metadata",
+      ],
+    });
+
+    if (!payment) {
+      throw new AppError("Payment not found.", 404);
+    }
+
+    if (payment.status !== "SUCCESSFUL") {
+      throw new AppError(
+        "A receipt is only available for successful payments.",
+        409
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment receipt retrieved successfully.",
+      data: {
+        receipt: {
+          receiptNumber: payment.reference,
+          paymentId: payment.id,
+          schoolId: payment.schoolId,
+          amount: payment.amount,
+          currency: payment.currency,
+          status: payment.status,
+          paymentMethod: payment.provider,
+          transactionId: payment.providerTransactionId,
+          paidAt: payment.paidAt,
+          plan: payment.metadata?.plan || null,
+          tierId: payment.metadata?.tierId || null,
+          billingCycle: payment.metadata?.billingCycle || null,
+        },
+      },
+    });
+  } catch (error) {
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "GET_PAYMENT_RECEIPT_ERROR",
+      "Unable to retrieve payment receipt."
+    );
+  }
+};

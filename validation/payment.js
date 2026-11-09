@@ -42,3 +42,29 @@ export const paymentStatusParamSchema = Joi.object({
     "any.required": "Payment reference is required.",
   }),
 }).required();
+
+
+export const paymentHistoryQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+
+  limit: Joi.number().integer().min(1).max(50).default(10),
+
+  status: Joi.string()
+    .trim()
+    .uppercase()
+    .valid(
+      "PENDING",
+      "PROCESSING",
+      "SUCCESSFUL",
+      "FAILED",
+      "CANCELLED"
+    )
+    .optional(),
+}).required();
+
+export const paymentReceiptParamSchema = Joi.object({
+  paymentId: Joi.string().uuid().required().messages({
+    "string.guid": "Payment ID must be a valid UUID.",
+    "any.required": "Payment ID is required.",
+  }),
+}).required();

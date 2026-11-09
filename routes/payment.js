@@ -1,14 +1,21 @@
 import express from "express";
+
 import {
   initializePayment,
   getPaymentStatus,
+  getPaymentHistory,
+  getPaymentReceipt,
 } from "../controllers/payment.js";
+
 import validate from "../middleware/validation.js";
-import { authorize, protectRoutes } from "../middleware/auth.js";
+import { protectRoutes, authorizeSchoolManagement } from "../middleware/auth.js";
+
 import {
   initializePaymentParamSchema,
   initializePaymentBodySchema,
   paymentStatusParamSchema,
+  paymentHistoryQuerySchema,
+  paymentReceiptParamSchema,
 } from "../validation/payment.js";
 
 const router = express.Router();
@@ -20,10 +27,34 @@ const router = express.Router();
 router.post(
   "/schools/:schoolId/initialize",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(initializePaymentParamSchema, "params"),
   validate(initializePaymentBodySchema, "body"),
   initializePayment
+);
+
+// ========================================
+// GET PAYMENT HISTORY
+// ========================================
+
+router.get(
+  "/history",
+  protectRoutes,
+  authorizeSchoolManagement,
+  validate(paymentHistoryQuerySchema, "query"),
+  getPaymentHistory
+);
+
+// ========================================
+// GET PAYMENT RECEIPT
+// ========================================
+
+router.get(
+  "/:paymentId/receipt",
+  protectRoutes,
+  authorizeSchoolManagement,
+  validate(paymentReceiptParamSchema, "params"),
+  getPaymentReceipt
 );
 
 // ========================================
@@ -33,7 +64,7 @@ router.post(
 router.get(
   "/:reference/status",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(paymentStatusParamSchema, "params"),
   getPaymentStatus
 );

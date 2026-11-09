@@ -1,6 +1,13 @@
 import jwt from "jsonwebtoken";
-import {User} from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
+import { Owner, User } from "../relationships/associations.js";
+
+const SCHOOL_MANAGEMENT_ROLES = [
+  "LEADER",
+  "VICE_LEADER",
+  "ADMINISTRATOR",
+];
+
 
 export const protectRoutes = async (req, res, next) => {
     try {
@@ -69,4 +76,41 @@ export const authorize = (...roles) => {
 
         next();
     };
+};
+
+
+export const authorizeSchoolManagement = async (req, res, next) => {
+  try {
+    const { id: userId, schoolId, role } = req.user || {};
+
+    if (!userId || !schoolId) {
+      return next(
+        new AppError("You are not authorized to access this resource.", 403)
+      );
+    }
+
+    // Allow authorized school management roles
+    if (SCHOOL_MANAGEMENT_ROLES.includes(role)) {
+      return next();
+    }
+
+    // Allow verified school owners
+    const owner = await Owner.findOne({
+      where: {
+        userId,
+        schoolId,
+      },
+      attributes: ["id"],
+    });
+
+    if (!owner) {
+      return next(
+        new AppError("You are not authorized to access this resource.", 403)
+      );
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 };

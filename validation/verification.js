@@ -27,3 +27,19 @@ export const verifyRecoveryCodeValidationSchema = Joi.object({
     "any.required": "Verification code is required.",
   }),
 }).required();
+
+export const resendRegistrationCodeValidationSchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required().messages({
+    "string.empty": "Email address is required.",
+    "string.email": "Please provide a valid email address.",
+    "any.required": "Email address is required.",
+  }),
+}).required();
+
+export const resendPasswordResetCodeValidationSchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required().messages({
+    "string.empty": "Email address is required.",
+    "string.email": "Please provide a valid email address.",
+    "any.required": "Email address is required.",
+  }),
+}).required();

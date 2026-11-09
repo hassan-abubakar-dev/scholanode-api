@@ -5,6 +5,7 @@ import { dbConnection } from "../config/db.js";
 import { createFreeSubscriptionForSchool } from "../services/subscription.js";
 import pricingConfig from "../config/pricing.js";
 import { resolvePricing } from "../services/pricing.js";
+import issueVerificationCode from "../services/verificationCode.js";
 
 import dotenv from "dotenv";
 
@@ -42,6 +43,25 @@ const isCodeExpired = (expiryTime) => {
     }
 
     return Date.now() > expiryTimestamp;
+};
+
+const escapeHtml = (value = "") =>
+  String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+
+    return entities[character];
+  });
+
+const passwordResetResponse = {
+  status: "success",
+  message:
+    "If an account matches that email address, password recovery instructions have been sent to it.",
 };
 
 /**
@@ -381,4 +401,178 @@ export const verifyRecoveryCode = async (req, res, next) => {
             )
         );
     }
+};
+
+
+export const resendSchoolRegistrationCode = async (req, res, next) => {
+  try {
+    const email = req.body.email.trim().toLowerCase();
+
+    const user = await User.findOne({
+      where: { email },
+    });
+
+    // Do not disclose whether an email belongs to an account.
+    if (!user || user.isEmailVerified) {
+      return res.status(200).json({
+        status: "success",
+        message:
+          "If an eligible registration matches that email address, a verification code will be sent.",
+      });
+    }
+
+    const school = await School.findByPk(user.schoolId);
+
+    if (!school || school.status !== "PENDING_VERIFICATION") {
+      return res.status(200).json({
+        status: "success",
+        message:
+          "If an eligible registration matches that email address, a verification code will be sent.",
+      });
+    }
+
+    const result = await issueVerificationCode({
+      userId: user.id,
+      email,
+      purpose: "SCHOOL_REGISTRATION",
+      subject: "Verify your ScholaNode school account",
+
+      buildEmail: (code) => `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; color: #333;">
+          <h2 style="color: #071A52;">ScholaNode Email Verification</h2>
+
+          <p>Hello ${escapeHtml(user.firstName)},</p>
+
+          <p>
+            Here is your new verification code for
+            <strong>${escapeHtml(school.schoolName)}</strong>.
+          </p>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #071A52;">
+              ${code}
+            </span>
+          </div>
+
+          <p>
+            This verification code will expire in 10 minutes.
+          </p>
+
+          <p>
+            Your Login ID: <strong>${escapeHtml(user.loginId)}</strong>
+          </p>
+
+          <p>If you did not request this code, you can ignore this email.</p>
+
+          <p>Best regards,<br>The ScholaNode Team</p>
+        </div>
+      `,
+    });
+
+    if (result.cooldown) {
+      return res.status(429).json({
+        status: "error",
+        message: `Please wait ${result.remainingSeconds} seconds before requesting another code.`,
+      });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      message: "A new verification code has been sent to your email address.",
+    });
+  } catch (error) {
+    console.error("RESEND_REGISTRATION_CODE_ERROR:", error);
+    return next(
+      new AppError("Unable to resend the verification code. Please try again.", 500)
+    );
+  }
+};
+
+export const resendPasswordResetCode = async (req, res, next) => {
+  const email = req.body.email.trim().toLowerCase();
+
+  try {
+    const user = await User.findOne({
+      where: {
+        email,
+        status: "ACTIVE",
+      },
+    });
+
+    if (!user) {
+      return res.status(200).json(passwordResetResponse);
+    }
+
+    const result = await issueVerificationCode({
+      userId: user.id,
+      email,
+      purpose: "PASSWORD_RESET",
+      subject: "Reset your ScholaNode password",
+
+      buildEmail: (code) => `
+        <div style="
+          font-family: Arial, sans-serif;
+          max-width: 600px;
+          margin: 0 auto;
+          border: 1px solid #e0e0e0;
+          border-radius: 8px;
+          overflow: hidden;
+          background-color: #ffffff;
+        ">
+          <div style="background-color: #071A52; padding: 20px; text-align: center;">
+            <h2 style="color: #ffffff; margin: 0;">
+              ScholaNode Account Recovery
+            </h2>
+          </div>
+
+          <div style="padding: 30px; color: #333333;">
+            <p>Hello ${escapeHtml(user.firstName)},</p>
+
+            <p>
+              You requested a new password-reset verification code.
+              Use the code below to continue:
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+              <span style="
+                font-size: 32px;
+                font-weight: bold;
+                color: #071A52;
+                background-color: #eef2ff;
+                padding: 15px 30px;
+                border-radius: 5px;
+                letter-spacing: 5px;
+              ">
+                ${code}
+              </span>
+            </div>
+
+            <p>
+              <strong>Security Note:</strong>
+              This verification code will expire in 10 minutes.
+              If you did not request a password reset, you can safely
+              ignore this email.
+            </p>
+
+            <p>Best regards,<br>The ScholaNode Security Team</p>
+          </div>
+        </div>
+      `,
+    });
+
+    // Keep the response generic, including during the cooldown.
+    if (result.cooldown || !result.sent) {
+      return res.status(200).json(passwordResetResponse);
+    }
+
+    return res.status(200).json(passwordResetResponse);
+  } catch (error) {
+    console.error("RESEND_PASSWORD_RESET_CODE_ERROR:", {
+      email,
+      error,
+    });
+
+    // Do not reveal whether email delivery or account lookup failed.
+    return res.status(200).json(passwordResetResponse);
+  }
 };

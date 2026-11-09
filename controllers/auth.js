@@ -194,7 +194,7 @@ export const loginUser = async (req, res, next) => {
       ip: req.ip,
       error,
     });
-
+ 
     return next(
       new AppError(
         isDev ? error.message : "Login failed. Please try again.",
@@ -677,21 +677,29 @@ export const forgotLoginId = async (req, res, next) => {
 
 
 export const forgotPassword = async (req, res, next) => {
-  const transaction = await dbConnection.transaction();
+  let transaction;
+  let verificationRecord = null;
+
+  const genericResponse = {
+    status: "success",
+    message:
+      "If an account matches that email address, password recovery instructions have been sent to it.",
+  };
+
+  let normalizedEmail;
 
   try {
     const { email } = req.body;
-    const normalizedEmail = email.trim().toLowerCase();
+    normalizedEmail = email.trim().toLowerCase();
 
     // =========================================================
-    // 3. FIND ACTIVE USER
+    // 1. START DATABASE TRANSACTION
     // =========================================================
-    //
-    // We intentionally only process ACTIVE accounts.
-    //
-    // If the account does not exist or is not active, we still
-    // return the same generic response to prevent account
-    // enumeration.
+
+    transaction = await dbConnection.transaction();
+
+    // =========================================================
+    // 2. FIND ACTIVE USER
     // =========================================================
 
     const user = await User.findOne({
@@ -700,52 +708,46 @@ export const forgotPassword = async (req, res, next) => {
         status: "ACTIVE",
       },
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     // =========================================================
-    // 4. GENERIC RESPONSE FOR UNKNOWN/INACTIVE ACCOUNT
-    // =========================================================
-    //
-    // Do not reveal whether the email belongs to an account.
+    // 3. GENERIC RESPONSE FOR UNKNOWN/INACTIVE ACCOUNTS
     // =========================================================
 
     if (!user) {
       await transaction.rollback();
+      transaction = null;
 
-      return res.status(200).json({
-        status: "success",
-        message:
-          "If an account matches that email address, password recovery instructions have been sent to it.",
-      });
+      return res.status(200).json(genericResponse);
     }
 
     // =========================================================
-    // 5. GENERATE RECOVERY CODE
+    // 4. GENERATE RECOVERY CODE
     // =========================================================
 
     const recoveryCode = generateVerificationCode();
     const expiryTime = generateExpiryTime();
 
     // =========================================================
-    // 6. REMOVE OLD RECOVERY CODES
+    // 5. CREATE NEW PASSWORD RESET CODE
+    // =========================================================
+    //
+    // We explicitly specify:
+    // - userId
+    // - purpose
+    //
+    // Existing codes are not deleted yet. We preserve them
+    // until the new email has been successfully sent.
     // =========================================================
 
-    await VerificationCode.destroy({
-      where: {
-        userEmail: normalizedEmail,
-      },
-      transaction,
-    });
-
-    // =========================================================
-    // 7. CREATE NEW RECOVERY CODE
-    // =========================================================
-
-    await VerificationCode.create(
+    verificationRecord = await VerificationCode.create(
       {
         code: recoveryCode,
         expiryTime,
         userEmail: normalizedEmail,
+        userId: user.id,
+        purpose: "PASSWORD_RESET",
       },
       {
         transaction,
@@ -753,7 +755,14 @@ export const forgotPassword = async (req, res, next) => {
     );
 
     // =========================================================
-    // 8. BUILD RECOVERY EMAIL
+    // 6. COMMIT BEFORE SENDING EMAIL
+    // =========================================================
+
+    await transaction.commit();
+    transaction = null;
+
+    // =========================================================
+    // 7. BUILD RECOVERY EMAIL
     // =========================================================
 
     const html = `
@@ -824,7 +833,7 @@ export const forgotPassword = async (req, res, next) => {
             line-height: 1.6;
           ">
             <strong>Security Note:</strong>
-            This verification code will expire in 15 minutes.
+            This verification code will expire in 10 minutes.
             If you did not request a password reset, you can
             safely ignore this email.
           </p>
@@ -854,7 +863,7 @@ export const forgotPassword = async (req, res, next) => {
     `;
 
     // =========================================================
-    // 9. SEND RECOVERY EMAIL
+    // 8. SEND RECOVERY EMAIL
     // =========================================================
 
     try {
@@ -873,43 +882,65 @@ export const forgotPassword = async (req, res, next) => {
         }
       );
 
-      await transaction.rollback();
+      // Remove the newly created code because the email
+      // could not be delivered.
+      try {
+        await verificationRecord.destroy();
+      } catch (cleanupError) {
+        console.error(
+          "FORGOT_PASSWORD_CODE_CLEANUP_ERROR:",
+          {
+            userId: user.id,
+            error: cleanupError,
+          }
+        );
+      }
 
-      return next(
-        new AppError(
-          isDev
-            ? emailError.message
-            : "Failed to send recovery email. Please try again.",
-          500
-        )
+      // Keep the response generic to prevent account enumeration.
+      return res.status(200).json(genericResponse);
+    }
+
+    // =========================================================
+    // 9. REMOVE PREVIOUS PASSWORD RESET CODES
+    // =========================================================
+    //
+    // Only remove codes belonging to this purpose.
+    // Registration and profile-email-change codes remain intact.
+    // =========================================================
+
+    try {
+      await VerificationCode.destroy({
+        where: {
+          userEmail: normalizedEmail,
+          purpose: "PASSWORD_RESET",
+          id: {
+            [Op.ne]: verificationRecord.id,
+          },
+        },
+      });
+    } catch (cleanupError) {
+      console.error(
+        "FORGOT_PASSWORD_OLD_CODES_CLEANUP_ERROR:",
+        {
+          email: normalizedEmail,
+          userId: user.id,
+          error: cleanupError,
+        }
       );
     }
 
     // =========================================================
-    // 10. COMMIT DATABASE CHANGES
+    // 10. GENERIC SUCCESS RESPONSE
     // =========================================================
 
-    await transaction.commit();
-
-    // =========================================================
-    // 11. GENERIC SUCCESS RESPONSE
-    // =========================================================
-
-    return res.status(200).json({
-      status: "success",
-      message:
-        "If an account matches that email address, password recovery instructions have been sent to it.",
-    });
+    return res.status(200).json(genericResponse);
 
   } catch (error) {
     // =========================================================
-    // UNEXPECTED ERROR
+    // 11. ROLLBACK IF TRANSACTION IS STILL OPEN
     // =========================================================
 
-    if (
-      transaction &&
-      !transaction.finished
-    ) {
+    if (transaction && !transaction.finished) {
       await transaction.rollback();
     }
 
@@ -917,13 +948,13 @@ export const forgotPassword = async (req, res, next) => {
       url: req.originalUrl,
       method: req.method,
       ip: req.ip,
-      email: req.body?.email,
+      email: normalizedEmail,
       error,
     });
 
     return next(
       new AppError(
-        isDev 
+        isDev
           ? error.message
           : "Unable to process password recovery. Please try again.",
         500
