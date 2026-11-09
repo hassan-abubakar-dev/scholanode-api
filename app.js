@@ -39,6 +39,7 @@ import announcementRouter from "./routes/announcement.js"
 import notificationRouter from "./routes/notification.js";
 import classSubjectRouter from "./routes/classSubject.js";
 import subscriptionRouter from "./routes/subscription.js";
+import assessmentConfigurationRouter from "./routes/assessmentConfiguration.js";
 
 
 
@@ -152,6 +153,7 @@ app.use("/api/announcements", announcementRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/class-subjects", classSubjectRouter);
 app.use("/api/subscriptions", subscriptionRouter);
+app.use("/api/assessment-configurations", assessmentConfigurationRouter);
 
 // error handle
 app.use(errorHandler);
@@ -196,7 +198,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         await testConnection();
 
         console.log("Synchronizing database models...");
-        await dbConnection.sync();
+        await dbConnection.sync({alter: true}); // Use { force: true } to drop and recreate tables, or { alter: true } to update tables without dropping
 
         console.log("Database connected and models synced successfully.");
 

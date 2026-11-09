@@ -1,5 +1,15 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Session, Term, Class, Subject, School, WorkingDay } from "../relationships/associations.js";
+import {
+  Session,
+  Term,
+  Class,
+  Subject,
+  School,
+  WorkingDay,
+  AssessmentConfiguration,
+  AssessmentComponent,
+  TermAssessmentConfiguration
+} from "../relationships/associations.js";
 import { dbConnection } from "../config/db.js";
 import AppError from "../utils/AppError.js";
 import { Op, col, fn, where as sequelizeWhere } from "sequelize";
@@ -229,14 +239,31 @@ export const createClass = async (req, res, next) => {
       : req.body;
 
     // 3. Normalize class levels and arms
-    const classesToCreate = submittedClasses.map(
-      ({ classLevel, arm }) => ({
-        schoolId,
-        classLevel: classLevel.trim().toUpperCase(),
-        arm: arm?.trim().toUpperCase() || null,
-      })
-    );
+ const classesToCreate = submittedClasses.map(
+  ({ classLevel, arm, educationSection }) => {
+    const normalizedClassLevel = canonicalizeClassLevel(classLevel);
 
+    const normalizedEducationSection =
+      normalizeOrInferEducationSection(
+        normalizedClassLevel,
+        educationSection
+      );
+
+    if (!normalizedEducationSection) {
+      throw new AppError(
+        `Unable to determine the educational section for "${classLevel}". Please provide a valid educational section.`,
+        400
+      );
+    }
+
+    return {
+      schoolId,
+      classLevel: normalizedClassLevel,
+      arm: canonicalizeArm(arm) || null,
+      educationSection: normalizedEducationSection,
+    };
+  }
+);
     // Case-insensitive comparison helpers
     const getLevelKey = (value) =>
       value.trim().toLowerCase();
@@ -581,9 +608,214 @@ export const saveWorkingDays = async (req, res, next) => {
   }
 };
 
+
+
+export const createAssessmentConfiguration = async (req, res, next) => {
+  try {
+    const schoolId = req.user?.schoolId;
+    const createdBy = req.user?.id;
+
+    if (!schoolId || !createdBy) {
+      return next(
+        new AppError("Authenticated school or user not found.", 401)
+      );
+    }
+
+    const {
+      educationSection,
+      effectiveFromTermId,
+      components,
+    } = req.body;
+
+    const result = await dbConnection.transaction(
+      async (transaction) => {
+        // Serialize initial configuration creation for this school.
+        const school = await School.findByPk(schoolId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (!school) {
+          throw new AppError("Authenticated school not found.", 404);
+        }
+
+        // Only create an initial configuration when none exists.
+        const existingConfiguration =
+          await AssessmentConfiguration.findOne({
+            where: {
+              schoolId,
+              educationSection,
+            },
+            transaction,
+          });
+
+        if (existingConfiguration) {
+          throw new AppError(
+            `An assessment configuration already exists for ${educationSection}. Manage it from Assessment Rules instead.`,
+            409
+          );
+        }
+
+        // Ensure this educational section is represented by at least one class.
+        const existingClass = await Class.findOne({
+          where: {
+            schoolId,
+            educationSection,
+          },
+          transaction,
+        });
+
+        if (!existingClass) {
+          throw new AppError(
+            `Create at least one class in ${educationSection} before configuring its assessments.`,
+            400
+          );
+        }
+
+        // Retrieve and lock the selected term.
+        const effectiveTerm = await Term.findByPk(
+          effectiveFromTermId,
+          {
+            transaction,
+            lock: transaction.LOCK.UPDATE,
+          }
+        );
+
+        if (!effectiveTerm) {
+          throw new AppError(
+            "The selected effective term was not found.",
+            404
+          );
+        }
+
+        // Verify that the selected term belongs to this school.
+        const effectiveSession = await Session.findOne({
+          where: {
+            id: effectiveTerm.sessionId,
+            schoolId,
+          },
+          transaction,
+        });
+
+        if (!effectiveSession) {
+          throw new AppError(
+            "The selected term does not belong to this school.",
+            403
+          );
+        }
+
+        if (
+          effectiveTerm.status === "COMPLETED" ||
+          effectiveSession.status === "COMPLETED"
+        ) {
+          throw new AppError(
+            "A completed term or academic session cannot receive a new assessment configuration.",
+            400
+          );
+        }
+
+        // Prevent duplicate term-section assignments.
+        const existingAssignment =
+          await TermAssessmentConfiguration.findOne({
+            where: {
+              schoolId,
+              termId: effectiveTerm.id,
+              educationSection,
+            },
+            transaction,
+          });
+
+        if (existingAssignment) {
+          throw new AppError(
+            `An assessment configuration is already assigned to ${educationSection} for this term.`,
+            409
+          );
+        }
+
+        // Create the first configuration version.
+        const configuration = await AssessmentConfiguration.create(
+          {
+            schoolId,
+            educationSection,
+            versionNumber: 1,
+            status: "ACTIVE",
+            previousVersionId: null,
+            effectiveFromTermId: effectiveTerm.id,
+            effectiveUntilTermId: null,
+            createdBy,
+          },
+          { transaction }
+        );
+
+        // Save all assessment components.
+        const createdComponents = await AssessmentComponent.bulkCreate(
+          components.map((component, index) => ({
+            assessmentConfigurationId: configuration.id,
+            componentName: component.componentName.trim(),
+            maximumMark: component.maximumMark,
+            weightPercentage: component.weightPercentage,
+            displayOrder: index + 1,
+          })),
+          {
+            transaction,
+            validate: true,
+          }
+        );
+
+        // Assign this exact configuration version to the selected term
+        // and educational section.
+        const termAssignment =
+          await TermAssessmentConfiguration.create(
+            {
+              schoolId,
+              termId: effectiveTerm.id,
+              educationSection,
+              assessmentConfigurationId: configuration.id,
+              assignedBy: createdBy,
+            },
+            { transaction }
+          );
+
+        return {
+          configuration,
+          components: createdComponents,
+          termAssignment,
+        };
+      }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: `${educationSection} assessment configuration created successfully and assigned to the selected term.`,
+      data: {
+        configuration: result.configuration,
+        components: result.components,
+        termAssignment: result.termAssignment,
+      },
+    });
+  } catch (error) {
+    if (error.name === "SequelizeUniqueConstraintError") {
+      return next(
+        new AppError(
+          "An assessment configuration or term assignment already exists for this educational section.",
+          409
+        )
+      );
+    }
+
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "ACADEMICSETUP_CONTROLLER_ERROR",
+      "Unable to create the assessment configuration. Please try again."
+    );
+  }
+};
+
+
 export const getAcademicSetupProgress = async (req, res, next) => {
   try {
-    // 1. Get authenticated school
     const schoolId = req.user?.schoolId;
 
     if (!schoolId) {
@@ -592,7 +824,7 @@ export const getAcademicSetupProgress = async (req, res, next) => {
       );
     }
 
-    // 2. Check for at least one fully configured three-term session.
+    // 1. Check for at least one fully configured three-term session.
     const sessions = await Session.findAll({
       where: { schoolId },
       attributes: ["id", "startDate", "endDate"],
@@ -610,6 +842,7 @@ export const getAcademicSetupProgress = async (req, res, next) => {
       const termsByName = Object.fromEntries(
         session.terms.map((term) => [term.termName, term])
       );
+
       const orderedTerms = [
         termsByName.FIRST_TERM,
         termsByName.SECOND_TERM,
@@ -645,32 +878,67 @@ export const getAcademicSetupProgress = async (req, res, next) => {
       );
     });
 
-    // 3. Check Classes & Arms
-    const classCount = await Class.count({
+    // 2. Check classes and arms.
+    const classes = await Class.findAll({
       where: { schoolId },
+      attributes: ["id", "educationSection"],
     });
 
-    const classesAndArmsCompleted = classCount > 0;
+    const classesAndArmsCompleted = classes.length > 0;
 
-    // 4. Check Subjects
+    // 3. Determine the educational sections used by this school.
+    const requiredSections = [
+      ...new Set(
+        classes
+          .map((schoolClass) => schoolClass.educationSection)
+          .filter(Boolean)
+      ),
+    ];
+
+    // 4. Check assessment configurations for those sections.
+    const configurations = requiredSections.length
+      ? await AssessmentConfiguration.findAll({
+          where: { schoolId },
+          attributes: ["educationSection"],
+        })
+      : [];
+
+    const configuredSections = [
+      ...new Set(
+        configurations.map(
+          (configuration) => configuration.educationSection
+        )
+      ),
+    ];
+
+    const missingAssessmentSections = requiredSections.filter(
+      (section) => !configuredSections.includes(section)
+    );
+
+    const assessmentConfigurationsCompleted =
+      requiredSections.length > 0 &&
+      missingAssessmentSections.length === 0;
+
+    // 5. Check subjects.
     const subjectCount = await Subject.count({
       where: { schoolId },
     });
 
     const subjectsCompleted = subjectCount > 0;
 
-    // 5. Check Working Days
+    // 6. Check working days.
     const workingDaysCount = await WorkingDay.count({
       where: { schoolId },
     });
 
     const workingDaysCompleted = workingDaysCount > 0;
 
-    // 6. Calculate progress across four setup steps
+    // 7. Calculate progress across five setup steps.
     const steps = {
       sessionsAndTerms: sessionsAndTermsCompleted,
       classesAndArms: classesAndArmsCompleted,
       subjects: subjectsCompleted,
+      assessmentConfigurations: assessmentConfigurationsCompleted,
       workingDays: workingDaysCompleted,
     };
 
@@ -679,19 +947,29 @@ export const getAcademicSetupProgress = async (req, res, next) => {
     ).length;
 
     const progress = Math.round(
-      (completedSteps / 4) * 100
+      (completedSteps / 5) * 100
     );
 
-    // 7. Success response
     return res.status(200).json({
       success: true,
       data: {
         progress,
         completed: progress === 100,
         steps,
+        assessmentConfiguration: {
+          requiredSections,
+          configuredSections,
+          missingSections: missingAssessmentSections,
+        },
       },
     });
   } catch (error) {
-    return handleControllerError(error, next, req, "ACADEMICSETUP_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "ACADEMICSETUP_CONTROLLER_ERROR",
+      "Unable to process this request. Please try again."
+    );
   }
 };

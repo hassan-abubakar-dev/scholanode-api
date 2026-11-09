@@ -37,6 +37,11 @@ import Payment from "../models/Payment.js";
 import VerificationCode from "../models/VerificationCode.js";
 
 import ClassSubject from "../models/ClassSubject.js";
+
+import AssessmentConfiguration from "../models/AssessmentConfiguration.js";
+import AssessmentComponent from "../models/AssessmentComponent.js";
+
+import TermAssessmentConfiguration from "../models/TermAssessmentConfiguration.js";
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -795,6 +800,128 @@ ClassSubject.belongsTo(Subject, {
   as: "subject",
 });
 
+
+/*
+|--------------------------------------------------------------------------
+| Assessment Configuration Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ AssessmentConfiguration
+School.hasMany(AssessmentConfiguration, {
+  foreignKey: "schoolId",
+  as: "assessmentConfigurations",
+});
+
+AssessmentConfiguration.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// User ↔ AssessmentConfiguration (creator)
+User.hasMany(AssessmentConfiguration, {
+  foreignKey: "createdBy",
+  as: "createdAssessmentConfigurations",
+});
+
+AssessmentConfiguration.belongsTo(User, {
+  foreignKey: "createdBy",
+  as: "creator",
+});
+
+// AssessmentConfiguration ↔ Term (effective start)
+Term.hasMany(AssessmentConfiguration, {
+  foreignKey: "effectiveFromTermId",
+  as: "assessmentConfigurationsStarting",
+});
+
+AssessmentConfiguration.belongsTo(Term, {
+  foreignKey: "effectiveFromTermId",
+  as: "effectiveFromTerm",
+});
+
+// AssessmentConfiguration ↔ Term (effective end)
+Term.hasMany(AssessmentConfiguration, {
+  foreignKey: "effectiveUntilTermId",
+  as: "assessmentConfigurationsEnding",
+});
+
+AssessmentConfiguration.belongsTo(Term, {
+  foreignKey: "effectiveUntilTermId",
+  as: "effectiveUntilTerm",
+});
+
+// AssessmentConfiguration ↔ AssessmentConfiguration
+// Previous version
+AssessmentConfiguration.belongsTo(AssessmentConfiguration, {
+  foreignKey: "previousVersionId",
+  as: "previousVersion",
+});
+
+// Next version
+AssessmentConfiguration.hasMany(AssessmentConfiguration, {
+  foreignKey: "previousVersionId",
+  as: "nextVersions",
+});
+
+// AssessmentConfiguration ↔ AssessmentComponent
+AssessmentConfiguration.hasMany(AssessmentComponent, {
+  foreignKey: "assessmentConfigurationId",
+  as: "components",
+});
+
+AssessmentComponent.belongsTo(AssessmentConfiguration, {
+  foreignKey: "assessmentConfigurationId",
+  as: "assessmentConfiguration",
+});
+
+
+
+// School ↔ TermAssessmentConfiguration
+School.hasMany(TermAssessmentConfiguration, {
+  foreignKey: "schoolId",
+  as: "termAssessmentConfigurations",
+});
+
+TermAssessmentConfiguration.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// Term ↔ TermAssessmentConfiguration
+Term.hasMany(TermAssessmentConfiguration, {
+  foreignKey: "termId",
+  as: "assessmentConfigurations",
+});
+
+TermAssessmentConfiguration.belongsTo(Term, {
+  foreignKey: "termId",
+  as: "term",
+});
+
+// AssessmentConfiguration ↔ TermAssessmentConfiguration
+AssessmentConfiguration.hasMany(TermAssessmentConfiguration, {
+  foreignKey: "assessmentConfigurationId",
+  as: "termAssignments",
+});
+
+TermAssessmentConfiguration.belongsTo(AssessmentConfiguration, {
+  foreignKey: "assessmentConfigurationId",
+  as: "assessmentConfiguration",
+});
+
+// User ↔ TermAssessmentConfiguration
+User.hasMany(TermAssessmentConfiguration, {
+  foreignKey: "assignedBy",
+  as: "assignedTermAssessmentConfigurations",
+});
+
+TermAssessmentConfiguration.belongsTo(User, {
+  foreignKey: "assignedBy",
+  as: "assigner",
+});
+
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -831,5 +958,8 @@ TimetablePeriod,
   Announcement,
   Payment,
   VerificationCode,
-  ClassSubject
+  ClassSubject,
+  AssessmentConfiguration,
+AssessmentComponent,
+TermAssessmentConfiguration,
 };

@@ -157,3 +157,97 @@ const multipleSubjectsSchema = Joi.object({
 export const createSubjectSchema = Joi.alternatives()
   .try(singleSubjectSchema, multipleSubjectsSchema)
   .required();
+
+
+  const assessmentComponentSchema = Joi.object({
+  componentName: Joi.string()
+    .trim()
+    .min(2)
+    .max(100)
+    .required()
+    .messages({
+      "string.empty": "Assessment component name is required.",
+      "string.min": "Assessment component name must be at least 2 characters.",
+      "string.max": "Assessment component name cannot exceed 100 characters.",
+      "any.required": "Assessment component name is required.",
+    }),
+
+  maximumMark: Joi.number()
+    .positive()
+    .precision(2)
+    .required()
+    .messages({
+      "number.base": "Maximum mark must be a number.",
+      "number.positive": "Maximum mark must be greater than zero.",
+      "number.precision": "Maximum mark cannot have more than 2 decimal places.",
+      "any.required": "Maximum mark is required.",
+    }),
+
+  weightPercentage: Joi.number()
+    .positive()
+    .max(100)
+    .precision(2)
+    .required()
+    .messages({
+      "number.base": "Weight percentage must be a number.",
+      "number.positive": "Weight percentage must be greater than zero.",
+      "number.max": "Weight percentage cannot exceed 100%.",
+      "number.precision": "Weight percentage cannot have more than 2 decimal places.",
+      "any.required": "Weight percentage is required.",
+    }),
+}).required();
+
+export const createAssessmentConfigurationSchema = Joi.object({
+  educationSection: Joi.string()
+    .valid(
+      "EARLY_YEARS",
+      "PRIMARY",
+      "JUNIOR_SECONDARY",
+      "SENIOR_SECONDARY"
+    )
+    .required()
+    .messages({
+      "any.only": "Select a valid educational section.",
+      "any.required": "Educational section is required.",
+    }),
+
+  effectiveFromTermId: Joi.string()
+    .guid({ version: ["uuidv4", "uuidv5"] })
+    .required()
+    .messages({
+      "string.guid": "A valid effective term ID is required.",
+      "any.required": "Select the term from which this configuration becomes effective.",
+    }),
+
+  components: Joi.array()
+    .items(assessmentComponentSchema)
+    .min(1)
+    .required()
+    .custom((components, helpers) => {
+      const names = components.map((component) =>
+        component.componentName.trim().toLowerCase()
+      );
+
+      if (new Set(names).size !== names.length) {
+        return helpers.error("array.unique");
+      }
+
+      const totalWeight = components.reduce(
+        (total, component) => total + component.weightPercentage,
+        0
+      );
+
+      // Avoid floating-point comparison problems.
+      if (Math.round(totalWeight * 100) !== 10000) {
+        return helpers.error("any.custom");
+      }
+
+      return components;
+    })
+    .messages({
+      "array.min": "At least one assessment component is required.",
+      "array.unique": "Assessment component names must be unique.",
+      "any.custom": "Assessment component weight percentages must total exactly 100%.",
+      "any.required": "Assessment components are required.",
+    }),
+}).required();

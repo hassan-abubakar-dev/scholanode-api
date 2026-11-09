@@ -4,6 +4,7 @@ import {
   createClass,
   createSubject,
   saveWorkingDays,
+  createAssessmentConfiguration,
   getAcademicSetupProgress,
 } from "../controllers/academicSetup.js";
 import { authorize, protectRoutes } from "../middleware/auth.js";
@@ -13,6 +14,7 @@ import {
   createClassSchema,
   createSubjectSchema,
   saveWorkingDaysSchema,
+   createAssessmentConfigurationSchema,
 } from "../validation/academicSetup.js";
 
 const router = express.Router();
@@ -51,6 +53,15 @@ router.post(
   authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
   validate(saveWorkingDaysSchema, "body"),
   saveWorkingDays
+);
+
+// Create initial assessment configuration for an educational section
+router.post(
+  "/assessment-configuration",
+  protectRoutes,
+  authorize("LEADER", "VICE_LEADER", "EXAM_OFFICER"),
+  validate(createAssessmentConfigurationSchema, "body"),
+  createAssessmentConfiguration
 );
 
 router.get(
