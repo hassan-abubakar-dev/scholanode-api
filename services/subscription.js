@@ -8,7 +8,10 @@ import pricingConfig, {
   calculateSubscriptionExpiry,
   calculateTrialExpiry,
 } from "../config/pricing.js";
-import { resolvePricing } from "./pricing.js";
+import {
+  resolvePricing,
+  assertSubscriptionUpgrade,
+} from "./pricing.js";
 
 
 const requireTransaction = (transaction) => {
@@ -71,8 +74,10 @@ export const createFreeSubscriptionForSchool = async ({
   );
 
   await clearSchoolSelection(school, transaction);
+
   return subscription;
 };
+
 
 export const createPaidSubscriptionFromVerifiedPayment = async ({
   payment,
@@ -85,8 +90,15 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
   }
 
   const metadata = payment.metadata;
+
   if (metadata?.schoolId !== payment.schoolId) {
     throw new Error("Payment metadata does not match the payment school.");
+  }
+
+  const purpose = metadata?.purpose;
+
+  if (!["INITIAL_ACTIVATION", "SUBSCRIPTION_UPGRADE"].includes(purpose)) {
+    throw new Error("Invalid payment purpose.");
   }
 
   const pricing = resolvePricing({
@@ -106,33 +118,27 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
     throw new Error("Payment metadata does not match configured pricing.");
   }
 
+  const expectedAmount = Number(pricing.price);
+
+  if (Number(payment.amount) !== expectedAmount) {
+    throw new Error("The payment amount does not match configured pricing.");
+  }
+
+  const paidAt = new Date(payment.paidAt);
+
+  if (Number.isNaN(paidAt.getTime())) {
+    throw new Error("A valid verified payment date is required.");
+  }
+
   const school = await School.findByPk(payment.schoolId, {
     transaction,
     lock: transaction.LOCK.UPDATE,
   });
 
   if (!school) {
-    throw new Error(`Associated school not found for payment ${payment.reference}.`);
-  }
-
-  if (
-    school.selectedPlan !== pricing.plan ||
-    String(school.selectedTierId) !== String(pricing.tierId) ||
-    school.selectedBillingCycle !== pricing.billingCycle
-  ) {
     throw new Error(
-      "The payment does not match the school's saved registration selection."
+      `Associated school not found for payment ${payment.reference}.`
     );
-  }
-
-  const expectedAmount = Number(pricing.price);
-  if (Number(payment.amount) !== expectedAmount) {
-    throw new Error("The payment amount does not match the configured pricing.");
-  }
-
-  const paidAt = new Date(payment.paidAt);
-  if (Number.isNaN(paidAt.getTime())) {
-    throw new Error("A valid verified payment date is required.");
   }
 
   const existingSubscription = await SubscriptionPlan.findOne({
@@ -141,13 +147,119 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
     lock: transaction.LOCK.UPDATE,
   });
 
-  if (existingSubscription) {
-    throw new Error("A subscription already exists for this school.");
+  // INITIAL ACTIVATION
+  if (purpose === "INITIAL_ACTIVATION") {
+    if (
+      school.selectedPlan !== pricing.plan ||
+      String(school.selectedTierId) !== String(pricing.tierId) ||
+      school.selectedBillingCycle !== pricing.billingCycle
+    ) {
+      throw new Error(
+        "The payment does not match the school's saved registration selection."
+      );
+    }
+
+    if (existingSubscription) {
+      throw new Error("A subscription already exists for this school.");
+    }
+
+    const subscription = await SubscriptionPlan.create(
+      {
+        schoolId: school.id,
+        plan: pricing.plan,
+        tierId: pricing.tierId,
+        billingCycle: pricing.billingCycle,
+        maxStudents: pricing.maxStudents,
+        status: "ACTIVE",
+        isAutoRenew: false,
+        trialEndsAt: null,
+        subscriptionEndsAt: calculateSubscriptionExpiry(
+          pricing.billingCycle,
+          paidAt
+        ),
+      },
+      { transaction }
+    );
+
+    // Activate the school after successful initial payment verification.
+    school.status = "ACTIVE";
+    school.isActive = true;
+    await school.save({ transaction });
+
+    // Clear the temporary registration subscription selection.
+    await clearSchoolSelection(school, transaction);
+
+    return subscription;
   }
 
-  const subscription = await SubscriptionPlan.create(
-    {
+  // SUBSCRIPTION UPGRADE
+  if (school.status !== "ACTIVE") {
+    throw new Error("Only active schools can complete subscription upgrades.");
+  }
+
+  if (!existingSubscription) {
+    throw new Error("The existing subscription could not be found.");
+  }
+
+  const previousSubscriptionMatches =
+    metadata.previousSubscriptionId === existingSubscription.id &&
+    metadata.previousPlan === existingSubscription.plan &&
+    (metadata.previousTierId ?? null) ===
+      (existingSubscription.tierId ?? null) &&
+    (metadata.previousBillingCycle ?? null) ===
+      (existingSubscription.billingCycle ?? null);
+
+  if (!previousSubscriptionMatches) {
+    throw new Error(
+      "The school's subscription has changed since this upgrade payment was initialized."
+    );
+  }
+
+  if (!["ACTIVE", "TRIAL"].includes(existingSubscription.status)) {
+    throw new Error(
+      "The existing subscription is no longer eligible for an upgrade."
+    );
+  }
+
+  const currentEndDate =
+    existingSubscription.subscriptionEndsAt ||
+    existingSubscription.trialEndsAt;
+
+  if (
+    currentEndDate &&
+    paidAt.getTime() >= new Date(currentEndDate).getTime()
+  ) {
+    throw new Error(
+      "The existing subscription expired before this upgrade payment was completed."
+    );
+  }
+
+  assertSubscriptionUpgrade({
+    currentSubscription: existingSubscription,
+    targetPricing: pricing,
+  });
+
+  // Recheck capacity because student numbers may have changed
+  // between payment initialization and webhook confirmation.
+  const activeStudents = await Student.count({
+    where: {
       schoolId: school.id,
+      admissionStatus: "ACTIVE",
+    },
+    transaction,
+  });
+
+  if (
+    pricing.maxStudents !== null &&
+    activeStudents > pricing.maxStudents
+  ) {
+    throw new Error(
+      "The school's active student count exceeds the selected subscription tier."
+    );
+  }
+
+  await existingSubscription.update(
+    {
       plan: pricing.plan,
       tierId: pricing.tierId,
       billingCycle: pricing.billingCycle,
@@ -163,8 +275,7 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
     { transaction }
   );
 
-  await clearSchoolSelection(school, transaction);
-  return subscription;
+  return existingSubscription;
 };
 
 

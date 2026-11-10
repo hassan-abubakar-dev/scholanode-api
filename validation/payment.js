@@ -32,6 +32,8 @@ export const initializePaymentBodySchema = Joi.object({
   }),
 
   metadata: Joi.object().unknown(true).optional(),
+
+  callback_url: Joi.string().uri().optional(),
 }).required();
 
 export const paymentStatusParamSchema = Joi.object({

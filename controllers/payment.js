@@ -5,9 +5,15 @@ import {
   Payment,
   School,
   SubscriptionPlan,
+  Student,
 } from "../relationships/associations.js";
+
+import {
+  resolvePricing,
+  assertSubscriptionUpgrade,
+} from "../services/pricing.js";
 import { dbConnection } from "../config/db.js";
-import { resolvePricing } from "../services/pricing.js";
+
 import {
   createPaidSubscriptionFromVerifiedPayment,
 } from "../services/subscription.js";
@@ -23,13 +29,28 @@ const paystackHeaders = () => ({
   "Content-Type": "application/json",
 });
 
-const paymentMetadata = (pricing, schoolId) => ({
+const paymentMetadata = (
+  pricing,
+  schoolId,
+  purpose = "INITIAL_ACTIVATION",
+  previousSubscription = null
+) => ({
+  purpose,
   plan: pricing.plan,
   tierId: pricing.tierId,
   billingCycle: pricing.billingCycle,
   minStudents: pricing.minStudents,
   maxStudents: pricing.maxStudents,
   schoolId,
+
+  ...(purpose === "SUBSCRIPTION_UPGRADE" && previousSubscription
+    ? {
+        previousSubscriptionId: previousSubscription.id,
+        previousPlan: previousSubscription.plan,
+        previousTierId: previousSubscription.tierId,
+        previousBillingCycle: previousSubscription.billingCycle,
+      }
+    : {}),
 });
 
 const resolvePaymentMetadata = (metadata, schoolId) => {
@@ -291,23 +312,54 @@ export const handlePaystackWebhook = async (req, res) => {
         lock: transaction.LOCK.UPDATE,
       });
 
-      if (!lockedPayment) throw new Error("Payment no longer exists.");
-      if (lockedPayment.status === "SUCCESSFUL") {
-        await transaction.rollback();
-        return res.status(200).json({
-          received: true,
-          message: "Payment already processed.",
-        });
-      }
+if (!lockedPayment) {
+  throw new Error("Payment no longer exists.");
+}
 
-      await lockedPayment.update(
-        {
-          status: "PROCESSING",
-          providerTransactionId: String(verified.id),
-          paidAt,
-        },
-        { transaction }
-      );
+// 1. Already processed successfully.
+if (lockedPayment.status === "SUCCESSFUL") {
+  await transaction.rollback();
+
+  return res.status(200).json({
+    received: true,
+    message: "Payment already processed.",
+  });
+}
+
+// 2. Payment previously failed or cancelled.
+if (["FAILED", "CANCELLED"].includes(lockedPayment.status)) {
+  await transaction.rollback();
+
+  console.error(
+    "PAYSTACK_LATE_SUCCESS_REQUIRES_RECONCILIATION:",
+    reference
+  );
+
+  return res.status(202).json({
+    received: true,
+    message: "Payment requires reconciliation.",
+  });
+}
+
+// 3. Only PENDING and PROCESSING payments can continue.
+if (!["PENDING", "PROCESSING"].includes(lockedPayment.status)) {
+  await transaction.rollback();
+
+  return res.status(202).json({
+    received: true,
+    message: "Payment is not in a processable state.",
+  });
+}
+
+// 4. Continue normal payment processing.
+await lockedPayment.update(
+  {
+    status: "PROCESSING",
+    providerTransactionId: String(verified.id),
+    paidAt,
+  },
+  { transaction }
+);
 
       await createPaidSubscriptionFromVerifiedPayment({
         payment: lockedPayment,
@@ -518,6 +570,241 @@ export const getPaymentReceipt = async (req, res, next) => {
       req,
       "GET_PAYMENT_RECEIPT_ERROR",
       "Unable to retrieve payment receipt."
+    );
+  }
+};
+
+
+export const initializeUpgradePayment = async (req, res, next) => {
+  let payment;
+  let transaction;
+
+  try {
+    const { email, plan, tierId, billingCycle, callback_url } = req.body;
+    const { schoolId } = req.params;
+
+    if (
+      !req.user ||
+      req.user.schoolId !== schoolId ||
+      !MANAGER_ROLES.includes(req.user.role)
+    ) {
+      throw new AppError(
+        "You are not authorized to upgrade this school's subscription.",
+        403
+      );
+    }
+
+    let pricing;
+
+    try {
+      pricing = resolvePricing({
+        plan,
+        tierId,
+        billingCycle,
+      });
+    } catch (error) {
+      throw new AppError(error.message, 400);
+    }
+
+    if (pricing.plan === "FREE" || Number(pricing.price) <= 0) {
+      throw new AppError(
+        "A paid plan must be selected for an upgrade.",
+        400
+      );
+    }
+
+    transaction = await dbConnection.transaction();
+
+    const school = await School.findByPk(schoolId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!school) {
+      throw new AppError("School not found.", 404);
+    }
+
+    if (school.status !== "ACTIVE") {
+      throw new AppError(
+        "Only active schools can upgrade their subscriptions.",
+        409
+      );
+    }
+
+    const currentSubscription = await SubscriptionPlan.findOne({
+      where: { schoolId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!currentSubscription) {
+      throw new AppError(
+        "No existing subscription was found for this school.",
+        404
+      );
+    }
+
+    if (
+      !["ACTIVE", "TRIAL"].includes(currentSubscription.status)
+    ) {
+      throw new AppError(
+        "Your current subscription is not eligible for an upgrade.",
+        409
+      );
+    }
+
+    // Do not allow upgrades from an already expired subscription.
+    const currentEndDate =
+      currentSubscription.subscriptionEndsAt ||
+      currentSubscription.trialEndsAt;
+
+    if (
+      currentEndDate &&
+      new Date(currentEndDate).getTime() <= Date.now()
+    ) {
+      throw new AppError(
+        "Your current subscription has expired. Please resolve its status before upgrading.",
+        409
+      );
+    }
+
+    try {
+      assertSubscriptionUpgrade({
+        currentSubscription,
+        targetPricing: pricing,
+      });
+    } catch (error) {
+      throw new AppError(error.message, 400);
+    }
+
+    // Verify the target capacity against actual active students.
+    const activeStudents = await Student.count({
+      where: {
+        schoolId,
+        admissionStatus: "ACTIVE",
+      },
+      transaction,
+    });
+
+    if (
+      pricing.maxStudents !== null &&
+      activeStudents > pricing.maxStudents
+    ) {
+      throw new AppError(
+        `Your school currently has ${activeStudents} active students. Select a tier that accommodates this number.`,
+        409
+      );
+    }
+
+    // Prevent concurrent payment attempts for this school.
+    const activeAttempt = await Payment.findOne({
+      where: {
+        schoolId,
+        status: {
+          [Op.in]: ["PENDING", "PROCESSING"],
+        },
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (activeAttempt) {
+      throw new AppError(
+        "An active payment attempt already exists for this school. Please complete or resolve it before starting another payment.",
+        409
+      );
+    }
+
+    const reference = `SCH_PAY_${crypto.randomUUID()}`;
+
+    const metadata = paymentMetadata(
+      pricing,
+      schoolId,
+      "SUBSCRIPTION_UPGRADE",
+      currentSubscription
+    );
+
+    payment = await Payment.create(
+      {
+        schoolId,
+        reference,
+        amount: pricing.price,
+        currency: PAYMENT_CURRENCY,
+        status: "PENDING",
+        provider: "PAYSTACK",
+        metadata,
+      },
+      { transaction }
+    );
+
+    await transaction.commit();
+    transaction = null;
+
+    let paystackResponse;
+
+    try {
+      paystackResponse = await axios.post(
+        `${PAYSTACK_URL}/transaction/initialize`,
+        {
+          email,
+          amount: Math.round(Number(pricing.price) * 100),
+          reference,
+          metadata,
+          ...(callback_url ? { callback_url } : {}),
+        },
+        {
+          headers: paystackHeaders(),
+        }
+      );
+    } catch (error) {
+      if (isDefiniteProviderFailure(error)) {
+        await Payment.update(
+          { status: "FAILED" },
+          {
+            where: {
+              id: payment.id,
+              status: "PENDING",
+            },
+          }
+        );
+      }
+
+      throw error;
+    }
+
+    await Payment.update(
+      { status: "PROCESSING" },
+      {
+        where: {
+          id: payment.id,
+          status: "PENDING",
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription upgrade payment initialized successfully.",
+      data: {
+        paymentId: payment.id,
+        reference,
+        purpose: "SUBSCRIPTION_UPGRADE",
+        pricing,
+        authorizationUrl:
+          paystackResponse.data.data.authorization_url,
+      },
+    });
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
+    return handleControllerError(
+      error,
+      next,
+      req,
+      "INITIALIZE_UPGRADE_PAYMENT_ERROR",
+      "Unable to initialize subscription upgrade payment."
     );
   }
 };

@@ -189,13 +189,9 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
         user.isEmailVerified = true;
         await user.save({ transaction });
 
-        // 7. Move the school to the next lifecycle stage.
-        school.status = "PENDING_ACTIVATION";
-        school.isActive = false;
-        await school.save({ transaction });
-
-        // 8. Validate the saved selection before completing verification.
+        // 7. Validate the saved subscription selection.
         let selectedPricing;
+
         try {
             selectedPricing = resolvePricing({
                 plan: school.selectedPlan,
@@ -209,18 +205,30 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
             );
         }
 
+        // 8. Handle FREE and PAID registration differently.
         if (selectedPricing.plan === pricingConfig.FREE.plan) {
+            // Create the FREE subscription.
             await createFreeSubscriptionForSchool({
                 school,
                 transaction,
                 verifiedAt: new Date(),
             });
+
+            // FREE schools become active immediately after email verification.
+            school.status = "ACTIVE";
+            school.isActive = true;
+        } else {
+            // PAID schools must complete payment before activation.
+            school.status = "PENDING_ACTIVATION";
+            school.isActive = false;
         }
+
+        await school.save({ transaction });
 
         // 9. Consume only the code that was verified.
         await existingCode.destroy({ transaction });
 
-        // 9. Commit all changes together.
+        // 10. Commit all changes together.
         await transaction.commit();
 
         return res.status(200).json({

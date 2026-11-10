@@ -120,3 +120,99 @@ export const resolvePricing = ({
   };
 };
 
+const PLAN_RANK = Object.freeze({
+  FREE: 0,
+  STARTER: 1,
+  STANDARD: 2,
+  PROFESSIONAL: 3,
+});
+
+/**
+ * Compare two subscription levels.
+ *
+ * Returns:
+ *  1  = target is higher
+ *  0  = equivalent level
+ * -1  = target is lower
+ *
+ * Plan rank takes priority.
+ * Within the same plan, student capacity determines the level.
+ */
+export const compareSubscriptionLevels = ({
+  currentPlan,
+  currentTierId,
+  targetPlan,
+  targetTierId,
+}) => {
+  const current = String(currentPlan || "").toUpperCase();
+  const target = String(targetPlan || "").toUpperCase();
+
+  if (
+    !Object.prototype.hasOwnProperty.call(PLAN_RANK, current) ||
+    !Object.prototype.hasOwnProperty.call(PLAN_RANK, target)
+  ) {
+    throw new Error("Invalid subscription plan.");
+  }
+
+  const currentRank = PLAN_RANK[current];
+  const targetRank = PLAN_RANK[target];
+
+  // A higher plan is always a higher subscription level.
+  if (targetRank > currentRank) return 1;
+
+  // A lower plan is never an upgrade.
+  if (targetRank < currentRank) return -1;
+
+  // Same plan: FREE cannot upgrade to another FREE tier.
+  if (current === "FREE") return 0;
+
+  // Same paid plan: compare student capacity.
+  const currentTier = findPricingTier(current, currentTierId);
+  const targetTier = findPricingTier(target, targetTierId);
+
+  const currentCapacity =
+    currentTier.maxStudents === null
+      ? Infinity
+      : Number(currentTier.maxStudents);
+
+  const targetCapacity =
+    targetTier.maxStudents === null
+      ? Infinity
+      : Number(targetTier.maxStudents);
+
+  if (targetCapacity > currentCapacity) return 1;
+  if (targetCapacity < currentCapacity) return -1;
+
+  return 0;
+};
+
+/**
+ * Validate that a requested subscription is a genuine upgrade.
+ */
+export const assertSubscriptionUpgrade = ({
+  currentSubscription,
+  targetPricing,
+}) => {
+  if (!currentSubscription || !targetPricing) {
+    throw new Error("Current subscription and target pricing are required.");
+  }
+
+  const comparison = compareSubscriptionLevels({
+    currentPlan: currentSubscription.plan,
+    currentTierId: currentSubscription.tierId,
+    targetPlan: targetPricing.plan,
+    targetTierId: targetPricing.tierId,
+  });
+
+  if (comparison < 0) {
+    throw new Error("You cannot downgrade your subscription.");
+  }
+
+  if (comparison === 0) {
+    throw new Error(
+      "The selected subscription is not an upgrade. Choose a higher plan or student capacity."
+    );
+  }
+
+  return true;
+};

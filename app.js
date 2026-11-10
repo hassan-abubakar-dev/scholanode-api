@@ -198,7 +198,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         await testConnection();
 
         console.log("Synchronizing database models...");
-        await dbConnection.sync({alter: true}); // Use { force: true } to drop and recreate tables, or { alter: true } to update tables without dropping
+        await dbConnection.sync(); // Use { force: true } to drop and recreate tables, or { alter: true } to update tables without dropping
 
         console.log("Database connected and models synced successfully.");
 

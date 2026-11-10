@@ -2,6 +2,7 @@ import express from "express";
 
 import {
   initializePayment,
+  initializeUpgradePayment,
   getPaymentStatus,
   getPaymentHistory,
   getPaymentReceipt,
@@ -31,6 +32,18 @@ router.post(
   validate(initializePaymentParamSchema, "params"),
   validate(initializePaymentBodySchema, "body"),
   initializePayment
+);
+
+// ========================================
+// INITIALIZE UPGRADE PAYMENT
+// ========================================
+router.post(
+  "/schools/:schoolId/upgrade/initialize",
+  protectRoutes,
+  authorizeSchoolManagement,
+  validate(initializePaymentParamSchema, "params"),
+  validate(initializePaymentBodySchema, "body"),
+  initializeUpgradePayment
 );
 
 // ========================================
