@@ -1,3 +1,4 @@
+
 import { DataTypes } from "sequelize";
 import { dbConnection } from "../config/db.js";
 
@@ -26,10 +27,7 @@ const Student = dbConnection.define(
     },
 
     gender: {
-      type: DataTypes.ENUM(
-        "MALE",
-        "FEMALE"
-      ),
+      type: DataTypes.ENUM("MALE", "FEMALE"),
       allowNull: false,
     },
 
@@ -38,7 +36,7 @@ const Student = dbConnection.define(
       allowNull: true,
     },
 
-      qrToken: {
+    qrToken: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       allowNull: false,
@@ -71,9 +69,25 @@ const Student = dbConnection.define(
     timestamps: true,
 
     indexes: [
+      // Admission numbers must be unique within each school.
       {
         unique: true,
+        name: "students_school_id_admission_number_unique",
         fields: ["schoolId", "admissionNumber"],
+      },
+
+      // One user account can have only one student profile.
+      {
+        unique: true,
+        name: "students_user_id_unique",
+        fields: ["userId"],
+      },
+
+      // Supports the composite foreign key to Classes.
+      {
+        unique: true,
+        name: "students_school_id_id_unique",
+        fields: ["schoolId", "id"],
       },
     ],
   }

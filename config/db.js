@@ -33,14 +33,16 @@ export const dbConnection = new Sequelize(
   process.env.DATABASE_PASSWORD,
   {
     host: process.env.DATABASE_HOST,
-    dialect: process.env.DATABASE_DIALECT || 'mysql',
-    logging: false, // Set to false to reduce console clutter during development/demo
+    port: Number(process.env.DATABASE_PORT || 5432),
+    dialect: process.env.DATABASE_DIALECT || "postgres",
+    logging: false,
+
     pool: {
-      max: 5,     // Maximum number of connections in pool
-      min: 0,     // Minimum number of connections
-      acquire: 30000, // Max time (ms) to wait for connection
-      idle: 10000 // Max time (ms) a connection can be idle before release
-    }
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000,
+    },
   }
 );
 

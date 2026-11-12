@@ -42,12 +42,18 @@ const Subject = dbConnection.define(
     tableName: "Subjects",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-        fields: ["schoolId", "subjectName"],
-      },
-    ],
+indexes: [
+  {
+    unique: true,
+    name: "subjects_school_id_subject_name_unique",
+    fields: ["schoolId", "subjectName"],
+  },
+  {
+    unique: true,
+    name: "subjects_school_id_id_unique",
+    fields: ["schoolId", "id"],
+  },
+],
   }
 );
 

@@ -1,4 +1,5 @@
-import { DataTypes } from "sequelize";
+
+import { DataTypes, Op } from "sequelize";
 import { dbConnection } from "../config/db.js";
 
 const Class = dbConnection.define(
@@ -57,7 +58,14 @@ const Class = dbConnection.define(
       defaultValue: "PRIMARY",
       validate: {
         isIn: {
-          args: [["EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY"]],
+          args: [
+            [
+              "EARLY_YEARS",
+              "PRIMARY",
+              "JUNIOR_SECONDARY",
+              "SENIOR_SECONDARY",
+            ],
+          ],
           msg: "Invalid educational section.",
         },
       },
@@ -73,12 +81,36 @@ const Class = dbConnection.define(
     tableName: "Classes",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-        fields: ["schoolId", "classLevel", "arm"],
+   indexes: [
+  // Only one unarmed class per school and class level
+  {
+    name: "classes_unarmed_unique",
+    unique: true,
+    fields: ["schoolId", "classLevel"],
+    where: {
+      arm: null,
+    },
+  },
+
+  // Each arm must be unique within its school and class level
+  {
+    name: "classes_armed_unique",
+    unique: true,
+    fields: ["schoolId", "classLevel", "arm"],
+    where: {
+      arm: {
+        [Op.ne]: null,
       },
-    ],
+    },
+  },
+
+  // Supports the composite foreign key from Students
+  {
+    name: "classes_school_id_id_unique",
+    unique: true,
+    fields: ["schoolId", "id"],
+  },
+],
   }
 );
 

@@ -19,7 +19,7 @@ const AssessmentConfiguration = dbConnection.define(
     // Educational section this configuration applies to
     educationSection: {
       type: DataTypes.ENUM(
-        "NURSERY",
+        "EARLY_YEARS",
         "PRIMARY",
         "JUNIOR_SECONDARY",
         "SENIOR_SECONDARY"
@@ -99,6 +99,17 @@ const AssessmentConfiguration = dbConnection.define(
         name: "assessment_config_previous_version",
         fields: ["previousVersionId"],
       },
+      {
+  name: "assessment_config_school_id_id_unique",
+  unique: true,
+  fields: ["schoolId", "id"],
+},
+  {
+    name: "assessment_config_one_active_per_section",
+    unique: true,
+    fields: ["schoolId", "educationSection"],
+    where: { status: "ACTIVE" },
+  },
     ],
   }
 );

@@ -7,7 +7,7 @@ import {
   createAssessmentConfiguration,
   getAcademicSetupProgress,
 } from "../controllers/academicSetup.js";
-import { authorize, protectRoutes } from "../middleware/auth.js";
+import { authorize, authorizeAcademicRead, protectRoutes } from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import {
   createSessionWithTermsSchema,
@@ -67,7 +67,7 @@ router.post(
 router.get(
   "/progress",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeAcademicRead,
   getAcademicSetupProgress
 );
 

@@ -42,6 +42,9 @@ import AssessmentConfiguration from "../models/AssessmentConfiguration.js";
 import AssessmentComponent from "../models/AssessmentComponent.js";
 
 import TermAssessmentConfiguration from "../models/TermAssessmentConfiguration.js";
+
+import AssessmentSheet from "../models/AssessmentSheet.js";
+import AssessmentScore from "../models/AssessmentScore.js";
 /*
 |--------------------------------------------------------------------------
 | School Relationships
@@ -922,6 +925,147 @@ TermAssessmentConfiguration.belongsTo(User, {
 });
 
 
+
+/*
+|--------------------------------------------------------------------------
+| Assessment Sheet Relationships
+|--------------------------------------------------------------------------
+*/
+
+// School ↔ AssessmentSheet
+School.hasMany(AssessmentSheet, {
+  foreignKey: "schoolId",
+  as: "assessmentSheets",
+});
+
+AssessmentSheet.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+// Term ↔ AssessmentSheet
+Term.hasMany(AssessmentSheet, {
+  foreignKey: "termId",
+  as: "assessmentSheets",
+});
+
+AssessmentSheet.belongsTo(Term, {
+  foreignKey: "termId",
+  as: "term",
+});
+
+// Class ↔ AssessmentSheet
+Class.hasMany(AssessmentSheet, {
+  foreignKey: "classId",
+  as: "assessmentSheets",
+});
+
+AssessmentSheet.belongsTo(Class, {
+  foreignKey: "classId",
+  as: "class",
+});
+
+// Subject ↔ AssessmentSheet
+Subject.hasMany(AssessmentSheet, {
+  foreignKey: "subjectId",
+  as: "assessmentSheets",
+});
+
+AssessmentSheet.belongsTo(Subject, {
+  foreignKey: "subjectId",
+  as: "subject",
+});
+
+// AssessmentConfiguration ↔ AssessmentSheet
+AssessmentConfiguration.hasMany(AssessmentSheet, {
+  foreignKey: "assessmentConfigurationId",
+  as: "assessmentSheets",
+});
+
+AssessmentSheet.belongsTo(AssessmentConfiguration, {
+  foreignKey: "assessmentConfigurationId",
+  as: "assessmentConfiguration",
+});
+
+// User ↔ AssessmentSheet (currently assigned teacher)
+User.hasMany(AssessmentSheet, {
+  foreignKey: "teacherId",
+  as: "assignedAssessmentSheets",
+});
+
+AssessmentSheet.belongsTo(User, {
+  foreignKey: "teacherId",
+  as: "teacher",
+});
+
+// User ↔ AssessmentSheet (generator)
+User.hasMany(AssessmentSheet, {
+  foreignKey: "generatedById",
+  as: "generatedAssessmentSheets",
+});
+
+AssessmentSheet.belongsTo(User, {
+  foreignKey: "generatedById",
+  as: "generator",
+});
+
+// User ↔ AssessmentSheet (submitter)
+User.hasMany(AssessmentSheet, {
+  foreignKey: "submittedById",
+  as: "submittedAssessmentSheets",
+});
+
+AssessmentSheet.belongsTo(User, {
+  foreignKey: "submittedById",
+  as: "submitter",
+});
+
+
+// AssessmentSheet ↔ AssessmentScore
+AssessmentSheet.hasMany(AssessmentScore, {
+  foreignKey: "assessmentSheetId",
+  as: "scores",
+});
+
+AssessmentScore.belongsTo(AssessmentSheet, {
+  foreignKey: "assessmentSheetId",
+  as: "assessmentSheet",
+});
+
+// Student ↔ AssessmentScore
+Student.hasMany(AssessmentScore, {
+  foreignKey: "studentId",
+  as: "assessmentScores",
+});
+
+AssessmentScore.belongsTo(Student, {
+  foreignKey: "studentId",
+  as: "student",
+});
+
+// AssessmentComponent ↔ AssessmentScore
+AssessmentComponent.hasMany(AssessmentScore, {
+  foreignKey: "assessmentComponentId",
+  as: "scores",
+});
+
+AssessmentScore.belongsTo(AssessmentComponent, {
+  foreignKey: "assessmentComponentId",
+  as: "assessmentComponent",
+});
+
+// School ↔ AssessmentScore
+School.hasMany(AssessmentScore, {
+  foreignKey: "schoolId",
+  as: "assessmentScores",
+});
+
+AssessmentScore.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
+
 /*
 |--------------------------------------------------------------------------
 | Export Models
@@ -962,4 +1106,6 @@ TimetablePeriod,
   AssessmentConfiguration,
 AssessmentComponent,
 TermAssessmentConfiguration,
+AssessmentSheet,
+AssessmentScore
 };

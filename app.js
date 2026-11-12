@@ -158,7 +158,7 @@ app.use("/api/assessment-configurations", assessmentConfigurationRouter);
 // error handle
 app.use(errorHandler);
 
-// Database Sync and Server Startup
+// Database Connection and Server Startup
 const PORT = process.env.PORT || 5000; 
 
 // A listen failure arrives as an 'error' event, not a rejected promise, so the
@@ -196,11 +196,6 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     try { 
         console.log("Testing database connection...");
         await testConnection();
-
-        console.log("Synchronizing database models...");
-        await dbConnection.sync(); // Use { force: true } to drop and recreate tables, or { alter: true } to update tables without dropping
-
-        console.log("Database connected and models synced successfully.");
 
        initializeSocket(httpServer);
 

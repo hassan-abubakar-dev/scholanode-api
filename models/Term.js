@@ -67,11 +67,20 @@ const Term = dbConnection.define(
     timestamps: true,
 
     indexes: [
-      {
-        unique: true,
-        fields: ["sessionId", "termName"],
-      },
-    ],
+  {
+    unique: true,
+    name: "terms_session_id_term_name_unique",
+    fields: ["sessionId", "termName"],
+  },
+  {
+    unique: true,
+    name: "terms_one_current_per_session",
+    fields: ["sessionId"],
+    where: {
+      isCurrent: true,
+    },
+  },
+],
   }
 );
 

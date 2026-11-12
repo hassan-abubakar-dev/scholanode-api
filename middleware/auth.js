@@ -131,6 +131,17 @@ export const authorizeSchoolManagement = async (req, res, next) => {
   }
 };
 
+// Academic read authorization adds EXAM_OFFICER to school management access.
+export const authorizeAcademicRead = (req, res, next) => {
+  const { id: userId, schoolId, role } = req.user || {};
+
+  if (userId && schoolId && role === "EXAM_OFFICER") {
+    return next();
+  }
+
+  return authorizeSchoolManagement(req, res, next);
+};
+
 // Academic management authorization
 // Allows only LEADER, VICE_LEADER and EXAM_OFFICER.
 export const authorizeAcademicManagement = (req, res, next) => {

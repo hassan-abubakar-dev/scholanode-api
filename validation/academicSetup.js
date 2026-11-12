@@ -174,11 +174,13 @@ export const createSubjectSchema = Joi.alternatives()
 
   maximumMark: Joi.number()
     .positive()
+    .max(999999.99)
     .precision(2)
     .required()
     .messages({
       "number.base": "Maximum mark must be a number.",
       "number.positive": "Maximum mark must be greater than zero.",
+      "number.max": "Maximum mark cannot exceed 999999.99.",
       "number.precision": "Maximum mark cannot have more than 2 decimal places.",
       "any.required": "Maximum mark is required.",
     }),

@@ -65,12 +65,21 @@ const Session = dbConnection.define(
     tableName: "Sessions",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-        fields: ["schoolId", "sessionName"],
-      },
-    ],
+  indexes: [
+  {
+    unique: true,
+    name: "sessions_school_id_session_name_unique",
+    fields: ["schoolId", "sessionName"],
+  },
+  {
+    unique: true,
+    name: "sessions_one_current_per_school",
+    fields: ["schoolId"],
+    where: {
+      isCurrent: true,
+    },
+  },
+],
   }
 );
 

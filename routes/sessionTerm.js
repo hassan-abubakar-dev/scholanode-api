@@ -1,5 +1,5 @@
 import express from "express";
-import { authorize, protectRoutes } from "../middleware/auth.js";
+import { authorize, authorizeAcademicRead, protectRoutes } from "../middleware/auth.js";
 import {
   getAllSessionsAndTerms, updateSessionWithTerms, activateSession, completeSession, activateTerm, completeTerm
 } from "../controllers/sessionTerm.js";
@@ -15,7 +15,7 @@ const router = express.Router();
 router.get(
   "/",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeAcademicRead,
   getAllSessionsAndTerms
 );
 
