@@ -10,33 +10,27 @@ const Payment = dbConnection.define(
       primaryKey: true,
     },
 
-    // ===============================
-    // PAYMENT OWNER
-    // ===============================
-
+    // School that owns this payment
     schoolId: {
       type: DataTypes.UUID,
       allowNull: false,
     },
 
-    // ===============================
-    // PAYMENT DETAILS
-    // ===============================
-
+    // Unique reference for this payment attempt
     reference: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
       },
     },
 
+    // Payment amount
     amount: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
       validate: {
-        min: 0,
+        min: 0.01,
       },
     },
 
@@ -49,10 +43,7 @@ const Payment = dbConnection.define(
       },
     },
 
-    // ===============================
-    // PAYMENT STATUS
-    // ===============================
-
+    // Payment status
     status: {
       type: DataTypes.ENUM(
         "PENDING",
@@ -65,42 +56,46 @@ const Payment = dbConnection.define(
       defaultValue: "PENDING",
     },
 
-    // ===============================
-    // PAYMENT PROVIDER
-    // ===============================
-
+    // Payment provider
     provider: {
       type: DataTypes.ENUM("PAYSTACK"),
       allowNull: false,
       defaultValue: "PAYSTACK",
     },
 
+    // Transaction ID returned by the payment provider
     providerTransactionId: {
       type: DataTypes.STRING,
       allowNull: true,
     },
 
-    // ===============================
-    // PAYMENT COMPLETION
-    // ===============================
-
+    // Date payment was successfully completed
     paidAt: {
       type: DataTypes.DATE,
       allowNull: true,
     },
 
-    // ===============================
-    // ADDITIONAL PAYMENT INFORMATION
-    // ===============================
-
+    // Additional payment information
     metadata: {
-      type: DataTypes.JSON,
+      type: DataTypes.JSONB,
       allowNull: true,
     },
   },
   {
     tableName: "Payments",
     timestamps: true,
+
+    indexes: [
+      {
+        name: "payments_reference_unique",
+        unique: true,
+        fields: ["reference"],
+      },
+      {
+        name: "payments_school_created_at_idx",
+        fields: ["schoolId", "createdAt"],
+      },
+    ],
   }
 );
 

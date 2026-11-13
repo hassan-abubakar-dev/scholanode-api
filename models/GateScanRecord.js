@@ -58,7 +58,7 @@ const GateScanRecord = dbConnection.define(
       },
       {
         // Useful for reviewing scans performed by a staff member
-        fields: ["scannedByUserId", "scannedAt"],
+        fields: ["schoolId", "scannedByUserId", "scannedAt"]
       },
     ],
   }

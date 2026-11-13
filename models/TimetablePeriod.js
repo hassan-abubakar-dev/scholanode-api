@@ -60,6 +60,11 @@ const TimetablePeriod = dbConnection.define(
 
     indexes: [
       {
+  unique: true,
+  fields: ["schoolId", "id"],
+  name: "timetable_periods_school_id_id_unique",
+},
+      {
         unique: true,
         fields: ["schoolId", "name"],
         name: "unique_timetable_period_name_per_school",

@@ -58,17 +58,22 @@ const AttendanceRegister = dbConnection.define(
     tableName: "AttendanceRegisters",
     timestamps: true,
 
-    indexes: [
-      {
-        // Only one register per class per school day
-        unique: true,
-        fields: ["schoolId", "classId", "attendanceDate"],
-      },
-      {
-        // Useful for filtering attendance by academic session and term
-        fields: ["schoolId", "sessionId", "termId"],
-      },
-    ],
+indexes: [
+  {
+    name: "attendance_register_school_id_id_unique",
+    unique: true,
+    fields: ["schoolId", "id"],
+  },
+  {
+    name: "attendance_register_class_date_unique",
+    unique: true,
+    fields: ["schoolId", "classId", "attendanceDate"],
+  },
+  {
+    name: "attendance_register_school_session_term",
+    fields: ["schoolId", "sessionId", "termId"],
+  },
+],
   }
 );
 

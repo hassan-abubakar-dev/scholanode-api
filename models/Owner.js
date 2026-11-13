@@ -24,12 +24,13 @@ const Owner = dbConnection.define(
     tableName: "Owners",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-         fields: ["schoolId", "userId"],
-      },
-    ],
+  indexes: [
+  {
+    unique: true,
+    fields: ["schoolId", "userId"],
+    name: "owners_school_user_unique",
+  },
+],
   }
 );
 

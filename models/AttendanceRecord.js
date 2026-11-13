@@ -1,3 +1,4 @@
+
 import { DataTypes } from "sequelize";
 import { dbConnection } from "../config/db.js";
 
@@ -8,6 +9,12 @@ const AttendanceRecord = dbConnection.define(
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
+    },
+
+    // School that owns this attendance record
+    schoolId: {
+      type: DataTypes.UUID,
+      allowNull: false,
     },
 
     // Attendance register this record belongs to
@@ -22,7 +29,6 @@ const AttendanceRecord = dbConnection.define(
       allowNull: false,
     },
 
-    // Student's attendance status
     // null = not yet confirmed
     // PRESENT = student is present
     // ABSENT = student is absent
@@ -38,13 +44,13 @@ const AttendanceRecord = dbConnection.define(
 
     indexes: [
       {
-        // A student can appear only once in a register
+        name: "attendance_record_register_student_unique",
         unique: true,
-        fields: ["attendanceRegisterId", "studentId"],
+        fields: ["schoolId", "attendanceRegisterId", "studentId"],
       },
       {
-        // Useful when retrieving a student's attendance history
-        fields: ["studentId"],
+        name: "attendance_record_school_student_index",
+        fields: ["schoolId", "studentId"],
       },
     ],
   }

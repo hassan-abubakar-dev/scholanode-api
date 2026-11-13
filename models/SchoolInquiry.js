@@ -13,12 +13,6 @@ const SchoolInquiry = dbConnection.define(
     schoolId: {
       type: DataTypes.UUID,
       allowNull: false,
-      references: {
-        model: "Schools",
-        key: "id",
-      },
-      onUpdate: "CASCADE",
-      onDelete: "CASCADE",
     },
 
     fullName: {
@@ -65,6 +59,7 @@ const SchoolInquiry = dbConnection.define(
   {
     tableName: "SchoolInquiries",
     timestamps: true,
+
     indexes: [
       {
         name: "school_inquiries_school_status_created_idx",

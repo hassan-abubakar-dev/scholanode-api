@@ -33,10 +33,9 @@ const Notification = dbConnection.define(
             allowNull: true,
         },
 
-        // JSON array: ["STAFF", "STUDENTS", "PARENTS"]
-        // Compatible with MySQL and PostgreSQL.
+        // JSONB array: ["STAFF", "STUDENTS", "PARENTS"]
         audience: {
-            type: DataTypes.JSON,
+            type: DataTypes.JSONB,
             allowNull: true,
             defaultValue: null,
             validate: {
@@ -96,9 +95,8 @@ const Notification = dbConnection.define(
         // RELATED RECORD
         // =====================================
 
-        // Optional reference to a related record,
-        // such as an announcement or complaint.
-        // This is not a foreign key.
+        // Optional reference to a related record.
+        // This is intentionally not a foreign key.
         referenceId: {
             type: DataTypes.UUID,
             allowNull: true,
@@ -109,7 +107,7 @@ const Notification = dbConnection.define(
         // =====================================
 
         metadata: {
-            type: DataTypes.JSON,
+            type: DataTypes.JSONB,
             allowNull: true,
         },
     },
@@ -120,12 +118,15 @@ const Notification = dbConnection.define(
         indexes: [
             {
                 fields: ["schoolId", "createdAt"],
+                name: "notifications_school_created_at_idx",
             },
             {
                 fields: ["recipientUserId", "createdAt"],
+                name: "notifications_recipient_created_at_idx",
             },
             {
                 fields: ["type"],
+                name: "notifications_type_idx",
             },
         ],
 
@@ -166,7 +167,9 @@ const Notification = dbConnection.define(
                     this.deliveryType !== "SHARED" &&
                     this.deliveryType !== "INDIVIDUAL"
                 ) {
-                    throw new Error("Invalid notification delivery type.");
+                    throw new Error(
+                        "Invalid notification delivery type."
+                    );
                 }
             },
         },

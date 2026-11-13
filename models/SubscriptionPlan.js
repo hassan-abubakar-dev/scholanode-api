@@ -17,8 +17,6 @@ const SubscriptionPlan = dbConnection.define(
     },
 
     // Subscription plan
-    // STARTER
-    // STANDARD
     plan: {
       type: DataTypes.ENUM(
         "FREE",
@@ -30,15 +28,13 @@ const SubscriptionPlan = dbConnection.define(
       defaultValue: "FREE",
     },
 
+    // Specific pricing tier for paid plans
     tierId: {
       type: DataTypes.STRING(50),
       allowNull: true,
     },
 
-    // Billing cycle
-    // MONTHLY
-    // TERMLY
-    // YEARLY
+    // Billing cycle for paid plans
     billingCycle: {
       type: DataTypes.ENUM(
         "MONTHLY",
@@ -59,10 +55,6 @@ const SubscriptionPlan = dbConnection.define(
     },
 
     // Current subscription status
-    // TRIAL
-    // ACTIVE
-    // EXPIRED
-    // SUSPENDED
     status: {
       type: DataTypes.ENUM(
         "TRIAL",
@@ -71,7 +63,7 @@ const SubscriptionPlan = dbConnection.define(
         "SUSPENDED"
       ),
       allowNull: false,
-      defaultValue: "TRIAL",
+      defaultValue: "ACTIVE",
     },
 
     // Whether the subscription should renew automatically
@@ -81,13 +73,14 @@ const SubscriptionPlan = dbConnection.define(
       defaultValue: false,
     },
 
-    // Date the free trial expires
+    // Date a genuine trial period expires
     trialEndsAt: {
       type: DataTypes.DATE,
       allowNull: true,
     },
 
-    // Date the paid subscription expires
+    // Date the current subscription expires.
+    // This also stores the 120-day expiry for the FREE plan.
     subscriptionEndsAt: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -97,12 +90,13 @@ const SubscriptionPlan = dbConnection.define(
     tableName: "SubscriptionPlans",
     timestamps: true,
 
-      indexes: [
-    {
-      unique: true,
-      fields: ["schoolId"],
-    },
-  ],
+    indexes: [
+      {
+        name: "subscription_plans_school_id_unique",
+        unique: true,
+        fields: ["schoolId"],
+      },
+    ],
   }
 );
 

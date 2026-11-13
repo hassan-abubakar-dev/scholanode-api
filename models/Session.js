@@ -66,6 +66,11 @@ const Session = dbConnection.define(
     timestamps: true,
 
   indexes: [
+    {
+  name: "sessions_school_id_id_unique",
+  unique: true,
+  fields: ["schoolId", "id"],
+},
   {
     unique: true,
     name: "sessions_school_id_session_name_unique",

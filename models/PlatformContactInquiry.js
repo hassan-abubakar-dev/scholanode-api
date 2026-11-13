@@ -10,27 +10,25 @@ const PlatformContactInquiry = dbConnection.define(
       primaryKey: true,
     },
 
-    // ===============================
-    // VISITOR INFORMATION
-    // ===============================
-
+    // Visitor information
     fullName: {
       type: DataTypes.STRING(100),
       allowNull: false,
+      validate: {
+        notEmpty: true,
+      },
     },
 
     email: {
       type: DataTypes.STRING(255),
       allowNull: false,
       validate: {
+        notEmpty: true,
         isEmail: true,
       },
     },
 
-    // ===============================
-    // INQUIRY INFORMATION
-    // ===============================
-
+    // Inquiry information
     category: {
       type: DataTypes.ENUM(
         "SCHOOL_REGISTRATION",
@@ -47,27 +45,27 @@ const PlatformContactInquiry = dbConnection.define(
     subject: {
       type: DataTypes.STRING(150),
       allowNull: false,
+      validate: {
+        notEmpty: true,
+      },
     },
 
     message: {
       type: DataTypes.TEXT,
       allowNull: false,
+      validate: {
+        notEmpty: true,
+      },
     },
 
-    // ===============================
-    // CONTACT PERMISSION
-    // ===============================
-
+    // Contact permission
     allowEmailReply: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
     },
 
-    // ===============================
-    // INQUIRY MANAGEMENT
-    // ===============================
-
+    // Inquiry management
     status: {
       type: DataTypes.ENUM(
         "NEW",
@@ -79,13 +77,13 @@ const PlatformContactInquiry = dbConnection.define(
       defaultValue: "NEW",
     },
 
-    // Platform team member who reviewed the inquiry.
+    // Platform team member who reviewed the inquiry
     reviewedByPlatformUserId: {
       type: DataTypes.UUID,
       allowNull: true,
     },
 
-    // When the inquiry was reviewed.
+    // When the inquiry was reviewed
     reviewedAt: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -97,12 +95,15 @@ const PlatformContactInquiry = dbConnection.define(
 
     indexes: [
       {
+        name: "platform_contact_inquiries_status_created_at_idx",
         fields: ["status", "createdAt"],
       },
       {
+        name: "platform_contact_inquiries_category_created_at_idx",
         fields: ["category", "createdAt"],
       },
       {
+        name: "platform_contact_inquiries_reviewer_status_idx",
         fields: ["reviewedByPlatformUserId", "status"],
       },
     ],

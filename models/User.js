@@ -129,12 +129,17 @@ role: {
     tableName: "Users",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-        fields: ["schoolId", "loginId"],
-      },
-    ],
+  indexes: [
+  {
+    unique: true,
+    fields: ["schoolId", "loginId"],
+  },
+  {
+    name: "users_school_id_id_unique",
+    unique: true,
+    fields: ["schoolId", "id"],
+  },
+],
   }
 );
 

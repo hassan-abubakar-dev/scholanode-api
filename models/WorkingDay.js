@@ -17,7 +17,7 @@ const WorkingDay = dbConnection.define(
     },
 
     days: {
-      type: DataTypes.JSON,
+      type: DataTypes.JSONB,
       allowNull: false,
       defaultValue: [
         "MONDAY",

@@ -99,6 +99,16 @@ Owner.belongsTo(User, {
   as: "user",
 });
 
+School.hasMany(Owner, {
+  foreignKey: "schoolId",
+  as: "owners",
+});
+
+Owner.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
 // School has many Classes
 School.hasMany(Class, { 
   foreignKey: "schoolId",
@@ -342,6 +352,18 @@ AttendanceRecord.belongsTo(Student, {
   as: "student",
 });
 
+
+// School ↔ AttendanceRecord
+School.hasMany(AttendanceRecord, {
+  foreignKey: "schoolId",
+  as: "attendanceRecords",
+});
+
+AttendanceRecord.belongsTo(School, {
+  foreignKey: "schoolId",
+  as: "school",
+});
+
 /*
 |--------------------------------------------------------------------------
 | Gate Scan Relationships
@@ -419,7 +441,7 @@ GateScanner.belongsTo(User, {
 // School ↔ WorkingDay
 School.hasOne(WorkingDay, {
   foreignKey: "schoolId",
-  as: "workingDays",
+  as: "workingDay",
 });
 
 WorkingDay.belongsTo(School, {
