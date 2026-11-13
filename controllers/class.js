@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Class, User, Student, Session, Term, AttendanceRegister, ClassSubject, TimetableLesson, SubjectAssignment } from "../relationships/associations.js";
+import { Class, User, Student, Session, Term, AttendanceRegister, ClassSubject, TimetableLesson } from "../relationships/associations.js";
 import {
   canonicalizeClassLevel,
   canonicalizeArm,
@@ -714,9 +714,6 @@ export const deleteClass = async (req, res, next) => {
     }
     if (TimetableLesson) {
       await TimetableLesson.destroy({ where: { classId }, transaction });
-    }
-    if (SubjectAssignment) {
-      await SubjectAssignment.destroy({ where: { classId }, transaction });
     }
 
     await classRecord.destroy({ transaction });

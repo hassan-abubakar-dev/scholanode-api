@@ -7,7 +7,6 @@ import Class from "../models/Class.js";
 import Subject from "../models/Subject.js";
 import Session from "../models/Session.js";
 import Term from "../models/Term.js";
-import SubjectAssignment from "../models/SubjectAssignment.js";
 import Parent from "../models/Parent.js";
 import ParentStudent from "../models/ParentStudent.js";
 
@@ -195,67 +194,6 @@ Session.hasMany(Term, {
 Term.belongsTo(Session, {
   foreignKey: "sessionId",
   as: "session",
-});
-
-/*
-|--------------------------------------------------------------------------
-| Subject Assignment Relationships
-|--------------------------------------------------------------------------
-*/
-
-// Teacher (User)
-User.hasMany(SubjectAssignment, {
-  foreignKey: "userId",
-  as: "subjectAssignments",
-});
-
-SubjectAssignment.belongsTo(User, {
-  foreignKey: "userId",
-  as: "teacher",
-});
-
-// Class
-Class.hasMany(SubjectAssignment, {
-  foreignKey: "classId",
-  as: "subjectAssignments",
-});
-
-SubjectAssignment.belongsTo(Class, {
-  foreignKey: "classId",
-  as: "class",
-});
-
-// Subject
-Subject.hasMany(SubjectAssignment, {
-  foreignKey: "subjectId",
-  as: "subjectAssignments",
-});
-
-SubjectAssignment.belongsTo(Subject, {
-  foreignKey: "subjectId",
-  as: "subject",
-});
-
-// Session
-Session.hasMany(SubjectAssignment, {
-  foreignKey: "sessionId",
-  as: "subjectAssignments",
-});
-
-SubjectAssignment.belongsTo(Session, {
-  foreignKey: "sessionId",
-  as: "session",
-});
-
-// Term
-Term.hasMany(SubjectAssignment, {
-  foreignKey: "termId",
-  as: "subjectAssignments",
-});
-
-SubjectAssignment.belongsTo(Term, {
-  foreignKey: "termId",
-  as: "term",
 });
 
 
@@ -1082,7 +1020,6 @@ export {
   Subject,
   Session,
   Term,
-  SubjectAssignment,
    Parent,
   ParentStudent,
 AttendanceRegister,

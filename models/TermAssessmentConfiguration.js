@@ -1,4 +1,3 @@
-
 import { DataTypes } from "sequelize";
 import { dbConnection } from "../config/db.js";
 
@@ -45,25 +44,26 @@ const TermAssessmentConfiguration = dbConnection.define(
     tableName: "TermAssessmentConfigurations",
     timestamps: true,
 
-    indexes: [
-      {
-        name: "term_assessment_section_unique",
-        unique: true,
-        fields: ["termId", "educationSection"],
-      },
-      {
-        name: "term_assessment_school_index",
-        fields: ["schoolId"],
-      },
-      {
-        name: "term_assessment_configuration_index",
-        fields: ["assessmentConfigurationId"],
-      },
-      {
-        name: "term_assessment_assigned_by_index",
-        fields: ["assignedBy"],
-      },
-    ],
+ indexes: [
+  {
+    name: "term_assessment_section_unique",
+    unique: true,
+    fields: ["termId", "educationSection"],
+  },
+  {
+    name: "term_assessment_configuration_index",
+    fields: ["schoolId", "assessmentConfigurationId"],
+  },
+  {
+    name: "term_assessment_assigned_by_index",
+    fields: ["schoolId", "assignedBy"],
+  },
+  {
+    name: "term_assessment_school_term_configuration_unique",
+    unique: true,
+    fields: ["schoolId", "termId", "assessmentConfigurationId"],
+  },
+],
   }
 );
 

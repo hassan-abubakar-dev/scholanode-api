@@ -80,25 +80,48 @@ const AssessmentSheet = dbConnection.define(
     tableName: "AssessmentSheets",
     timestamps: true,
 
-    indexes: [
-      {
-        name: "assessment_sheet_term_class_subject_unique",
-        unique: true,
-        fields: ["termId", "classId", "subjectId"],
-      },
-      {
-        name: "assessment_sheet_school_term",
-        fields: ["schoolId", "termId"],
-      },
-      {
-        name: "assessment_sheet_teacher_status",
-        fields: ["teacherId", "status"],
-      },
-      {
-        name: "assessment_sheet_configuration",
-        fields: ["assessmentConfigurationId"],
-      },
-    ],
+
+indexes: [
+  {
+  name: "assessment_sheet_school_id_id_unique",
+  unique: true,
+  fields: ["schoolId", "id"],
+},
+  {
+    name: "assessment_sheet_term_class_subject_unique",
+    unique: true,
+    fields: ["termId", "classId", "subjectId"],
+  },
+  {
+    name: "assessment_sheet_class_subject_index",
+    fields: ["schoolId", "classId", "subjectId"],
+  },
+  {
+    name: "assessment_sheet_subject_index",
+    fields: ["schoolId", "subjectId"],
+  },
+  {
+    name: "assessment_sheet_school_term_configuration",
+    fields: ["schoolId", "termId", "assessmentConfigurationId"],
+  },
+  {
+    name: "assessment_sheet_teacher_status",
+    fields: ["schoolId", "teacherId", "status"],
+  },
+  {
+    name: "assessment_sheet_configuration",
+    fields: ["schoolId", "assessmentConfigurationId"],
+  },
+  {
+    name: "assessment_sheet_generated_by",
+    fields: ["schoolId", "generatedById"],
+  },
+  {
+    name: "assessment_sheet_submitted_by",
+    fields: ["schoolId", "submittedById"],
+  },
+],
+
   }
 );
 

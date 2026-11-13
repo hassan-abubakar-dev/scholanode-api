@@ -49,12 +49,19 @@ const ParentStudent = dbConnection.define(
     tableName: "ParentStudents",
     timestamps: true,
 
-    indexes: [
-      {
-        unique: true,
-        fields: ["parentId", "studentId"],
-      },
-    ],
+
+indexes: [
+  {
+    name: "parent_student_unique",
+    unique: true,
+    fields: ["schoolId", "parentId", "studentId"],
+  },
+  {
+    name: "parent_student_student_index",
+    fields: ["schoolId", "studentId"],
+  },
+],
+
   }
 );
 

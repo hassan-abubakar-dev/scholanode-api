@@ -62,16 +62,12 @@ const AssessmentComponent = dbConnection.define(
     timestamps: true,
 
     indexes: [
-      {
-        name: "assessment_component_config_order_unique",
-        unique: true,
-        fields: ["assessmentConfigurationId", "displayOrder"],
-      },
-      {
-        name: "assessment_component_configuration_index",
-        fields: ["assessmentConfigurationId"],
-      },
-    ],
+  {
+    name: "assessment_component_config_order_unique",
+    unique: true,
+    fields: ["assessmentConfigurationId", "displayOrder"],
+  },
+],
   }
 );
 

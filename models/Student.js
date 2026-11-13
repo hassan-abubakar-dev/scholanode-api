@@ -89,6 +89,7 @@ const Student = dbConnection.define(
         name: "students_school_id_id_unique",
         fields: ["schoolId", "id"],
       },
+      
     ],
   }
 );

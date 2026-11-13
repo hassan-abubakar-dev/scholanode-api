@@ -17,8 +17,7 @@ const Parent = dbConnection.define(
 
     userId: {
       type: DataTypes.UUID,
-      allowNull: false,
-      unique: true,
+      allowNull: false
     },
 
     // ===============================
@@ -39,12 +38,20 @@ const Parent = dbConnection.define(
     tableName: "Parents",
     timestamps: true,
 
-   indexes: [
+
+indexes: [
   {
+    name: "parents_school_id_user_id_unique",
     unique: true,
     fields: ["schoolId", "userId"],
   },
+  {
+    name: "parents_school_id_id_unique",
+    unique: true,
+    fields: ["schoolId", "id"],
+  },
 ],
+
   }
 );
 

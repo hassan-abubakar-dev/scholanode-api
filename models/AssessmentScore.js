@@ -35,37 +35,41 @@ const AssessmentScore = dbConnection.define(
     },
 
     // Actual score entered by the teacher
-    score: {
-      type: DataTypes.DECIMAL(7, 2),
-      allowNull: true,
-      validate: {
-        min: 0,
-      },
-    },
+   score: {
+    type: DataTypes.DECIMAL(8, 2),
+    allowNull: true,
+    validate: {
+    min: 0,
+  },
+},
   },
   {
     tableName: "AssessmentScores",
     timestamps: true,
 
-    indexes: [
-      {
-        name: "assessment_score_sheet_student_component_unique",
-        unique: true,
-        fields: [
-          "assessmentSheetId",
-          "studentId",
-          "assessmentComponentId",
-        ],
-      },
-      {
-        name: "assessment_score_school_sheet",
-        fields: ["schoolId", "assessmentSheetId"],
-      },
-      {
-        name: "assessment_score_student",
-        fields: ["studentId"],
-      },
+   indexes: [
+  {
+    name: "assessment_score_sheet_student_component_unique",
+    unique: true,
+    fields: [
+      "assessmentSheetId",
+      "studentId",
+      "assessmentComponentId",
     ],
+  },
+  {
+    name: "assessment_score_school_sheet",
+    fields: ["schoolId", "assessmentSheetId"],
+  },
+  {
+    name: "assessment_score_student",
+    fields: ["schoolId", "studentId"],
+  },
+  {
+    name: "assessment_score_component",
+    fields: ["assessmentComponentId"],
+  },
+],
   }
 );
 
