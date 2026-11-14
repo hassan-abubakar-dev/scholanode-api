@@ -1,40 +1,38 @@
+
 /**
  * @file dbConnection.js
- * @description Centralized database configuration and connectivity service.
- * This module initializes the Sequelize instance for MySQL and provides 
- * validation to ensure the application environment is correctly configured.
+ * @description Centralized PostgreSQL database configuration.
+ * Supports local development using individual environment variables
+ * and production using a PostgreSQL connection URL.
  */
 
 import { Sequelize } from "sequelize";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 
 dotenv.config();
 
-/**
- * Validate that all required environment variables are present.
- * If any are missing, the application will throw an error and terminate immediately.
- * This meets the "fatal error on startup" requirement for the assignment.
- */
-const required = ['DATABASE_NAME', 'DATABASE_USERNAME', 'DATABASE_PASSWORD', 'DATABASE_HOST'];
-required.forEach(key => {
-  if (!process.env[key]) {
-    throw new Error(`FATAL: Missing ${key} in environment configuration. Application cannot start.`);
-  }
-});
+const isProduction = process.env.NODE_ENV === "production";
 
-/**
- * Sequelize database instance configured for MySQL.
- * Uses a connection pool to manage multiple simultaneous database operations efficiently.
- * @type {Sequelize}
- */
-export const dbConnection = new Sequelize(
-  process.env.DATABASE_NAME,
-  process.env.DATABASE_USERNAME,
-  process.env.DATABASE_PASSWORD,
-  {
-    host: process.env.DATABASE_HOST,
-    port: Number(process.env.DATABASE_PORT || 5432),
-    dialect: process.env.DATABASE_DIALECT || "postgres",
+let dbConnection;
+
+if (isProduction) {
+  // Production: Supabase PostgreSQL connection URL
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      "FATAL: DATABASE_URL is missing from production environment."
+    );
+  }
+
+  dbConnection = new Sequelize(process.env.DATABASE_URL, {
+    dialect: "postgres",
+
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false,
+      },
+    },
+
     logging: false,
 
     pool: {
@@ -43,22 +41,55 @@ export const dbConnection = new Sequelize(
       acquire: 30000,
       idle: 10000,
     },
-  }
-);
+  });
+} else {
+  // Local development: individual database environment variables
+  const required = [
+    "DATABASE_NAME",
+    "DATABASE_USERNAME",
+    "DATABASE_PASSWORD",
+    "DATABASE_HOST",
+  ];
+
+  required.forEach((key) => {
+    if (!process.env[key]) {
+      throw new Error(
+        `FATAL: Missing ${key} in environment configuration.`
+      );
+    }
+  });
+
+  dbConnection = new Sequelize(
+    process.env.DATABASE_NAME,
+    process.env.DATABASE_USERNAME,
+    process.env.DATABASE_PASSWORD,
+    {
+      host: process.env.DATABASE_HOST,
+      port: Number(process.env.DATABASE_PORT || 5432),
+      dialect: "postgres",
+      logging: false,
+
+      pool: {
+        max: 5,
+        min: 0,
+        acquire: 30000,
+        idle: 10000,
+      },
+    }
+  );
+}
+
+export { dbConnection };
 
 /**
- * Tests the database connection by authenticating the credentials.
- * If the connection fails, it logs the error and stops the process to prevent 
- * the application from running in a broken state.
- * @async
- * @returns {Promise<void>}
+ * Tests the database connection.
  */
 export const testConnection = async () => {
   try {
     await dbConnection.authenticate();
-    console.log('Database connection successful');
+    console.log("Database connection successful");
   } catch (err) {
-    console.error('Database connection failed:', err.message);
-    process.exit(1); // Exit process with failure code
+    console.error("Database connection failed:", err);
+    process.exit(1);
   }
 };
