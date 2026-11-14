@@ -45,7 +45,11 @@ for (const [modulePath, names] of [
   });
 }
 
-const { authorizeAcademicRead, protectRoutes } = await import("../middleware/auth.js");
+const {
+  authorizeAcademicRead,
+  authorizeSchoolManagement,
+  protectRoutes,
+} = await import("../middleware/auth.js");
 const { default: academicSetup } = await import("../routes/academicSetup.js");
 const { default: sessionTerm } = await import("../routes/sessionTerm.js");
 const { default: assessment } = await import("../routes/assessmentConfiguration.js");
@@ -66,7 +70,7 @@ async function authorizeWith(middleware, request) {
   return next.mock.calls[0].arguments[0];
 }
 
-for (const role of roles.slice(0, 4)) {
+for (const role of ["LEADER", "VICE_LEADER", "EXAM_OFFICER"]) {
   test(`academic read permits ${role} without an ownership lookup`, async () => {
     assert.equal(await authorizeWith(authorizeAcademicRead, { user: user(role) }), undefined);
   });
@@ -86,7 +90,7 @@ test("academic read allows only ownership verified for the authenticated user an
   const lookup = t.mock.method(Owner, "findOne", async ({ where }) => (
     where.userId === "user-1" && where.schoolId === "school-1" ? { id: "owner-1" } : null
   ));
-  for (const role of ["TEACHER", "OWNER"]) {
+  for (const role of ["TEACHER", "OWNER", "ADMINISTRATOR"]) {
     assert.equal(await authorizeWith(authorizeAcademicRead, { user: user(role) }), undefined);
     assert.deepEqual(lookup.mock.calls.at(-1).arguments[0], {
       where: { userId: "user-1", schoolId: "school-1" },
@@ -101,9 +105,28 @@ test("academic read allows only ownership verified for the authenticated user an
   }
 });
 
-test("academic read denies other roles and an unverified OWNER claim", async (t) => {
+test("school management excludes EXAM_OFFICER unless verified as an owner", async (t) => {
+  const lookup = t.mock.method(Owner, "findOne", async () => null);
+
+  for (const role of ["LEADER", "VICE_LEADER", "ADMINISTRATOR"]) {
+    assert.equal(
+      await authorizeWith(authorizeSchoolManagement, { user: user(role) }),
+      undefined
+    );
+  }
+
+  assert.equal(
+    (await authorizeWith(authorizeSchoolManagement, {
+      user: user("EXAM_OFFICER"),
+    })).statusCode,
+    403
+  );
+  assert.equal(lookup.mock.callCount(), 1);
+});
+
+test("academic read denies ADMINISTRATOR and unverified OWNER claims", async (t) => {
   t.mock.method(Owner, "findOne", async () => null);
-  for (const role of ["TEACHER", "STUDENT", "OWNER", undefined]) {
+  for (const role of ["ADMINISTRATOR", "TEACHER", "STUDENT", "OWNER", undefined]) {
     assert.equal((await authorizeWith(authorizeAcademicRead, { user: user(role) })).statusCode, 403);
   }
 });

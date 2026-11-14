@@ -131,15 +131,45 @@ export const authorizeSchoolManagement = async (req, res, next) => {
   }
 };
 
-// Academic read authorization adds EXAM_OFFICER to school management access.
-export const authorizeAcademicRead = (req, res, next) => {
-  const { id: userId, schoolId, role } = req.user || {};
+// Academic reads allow LEADER, VICE_LEADER, EXAM_OFFICER and verified OWNER.
+export const authorizeAcademicRead = async (req, res, next) => {
+  try {
+    const { id: userId, schoolId, role } = req.user || {};
 
-  if (userId && schoolId && role === "EXAM_OFFICER") {
+    if (!userId || !schoolId) {
+      return next(
+        new AppError(
+          "You are not authorized to access this resource.",
+          403
+        )
+      );
+    }
+
+    if (ACADEMIC_MANAGEMENT_ROLES.includes(role)) {
+      return next();
+    }
+
+    const owner = await Owner.findOne({
+      where: {
+        userId,
+        schoolId,
+      },
+      attributes: ["id"],
+    });
+
+    if (!owner) {
+      return next(
+        new AppError(
+          "You are not authorized to access this resource.",
+          403
+        )
+      );
+    }
+
     return next();
+  } catch (error) {
+    return next(error);
   }
-
-  return authorizeSchoolManagement(req, res, next);
 };
 
 // Academic management authorization

@@ -1,5 +1,5 @@
 import { handleControllerError } from "../utils/controllerError.js";
-import { Owner, User } from "../relationships/associations.js";
+import { User } from "../relationships/associations.js";
 import { Op } from "sequelize";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -29,6 +29,22 @@ const escapeHtml = (value) =>
     "'": "&#39;",
   })[character]);
 
+const rollbackTransaction = async (transaction, label) => {
+  if (!transaction || transaction.finished) {
+    return;
+  }
+
+  try {
+    await transaction.rollback();
+  } catch (error) {
+    console.error(label, {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    });
+  }
+};
+
 // Roles that may be invited through staff management.
 const INVITABLE_ROLES = [
   "LEADER",
@@ -52,10 +68,7 @@ const ADMINISTRATIVE_ROLES = [
   "ADMINISTRATOR",
 ];
 
-const requireStaffManagementAccess = async (
-  req,
-  { administrativeOnly = false } = {}
-) => {
+const requireStaffActivationAccess = (req) => {
   const schoolId = req.user?.schoolId;
   const userId = req.user?.id;
 
@@ -63,34 +76,19 @@ const requireStaffManagementAccess = async (
     throw new AppError("Authenticated school or user not found.", 401);
   }
 
-  if (ADMINISTRATIVE_ROLES.includes(req.user.role)) {
-    return schoolId;
+  if (!ADMINISTRATIVE_ROLES.includes(req.user.role)) {
+    throw new AppError(
+      "Only school administrators can activate or deactivate staff accounts.",
+      403
+    );
   }
 
-  if (!administrativeOnly) {
-    const owner = await Owner.findOne({
-      where: {
-        schoolId,
-        userId,
-      },
-    });
-
-    if (owner) {
-      return schoolId;
-    }
-  }
-
-  throw new AppError(
-    administrativeOnly
-      ? "Only school administrators can activate or deactivate staff accounts."
-      : "You are not authorized to manage staff accounts.",
-    403
-  );
+  return schoolId;
 };
 
 export const getAllStaff = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
 
     const staff = await User.findAll({
       where: {
@@ -158,9 +156,7 @@ export const getAllStaff = async (req, res, next) => {
 
 export const deactivateStaff = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req, {
-      administrativeOnly: true,
-    });
+    const schoolId = requireStaffActivationAccess(req);
     const { staffId } = req.params;
 
     const staff = await User.findOne({
@@ -174,24 +170,18 @@ export const deactivateStaff = async (req, res, next) => {
     });
 
     if (!staff) {
-      return res.status(404).json({
-        success: false,
-        message: "Staff account not found.",
-      });
+      throw new AppError("Staff account not found.", 404);
     }
 
     if (staff.status === "INACTIVE") {
-      return res.status(400).json({
-        success: false,
-        message: "This staff account is already inactive.",
-      });
+      throw new AppError("This staff account is already inactive.", 400);
     }
 
     if (staff.role === "LEADER") {
-      return res.status(403).json({
-        success: false,
-        message: "The school leader's account cannot be deactivated through staff management.",
-      });
+      throw new AppError(
+        "The school leader's account cannot be deactivated through staff management.",
+        403
+      );
     }
 
     staff.status = "INACTIVE";
@@ -217,9 +207,7 @@ export const deactivateStaff = async (req, res, next) => {
 
 export const activateStaff = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req, {
-      administrativeOnly: true,
-    });
+    const schoolId = requireStaffActivationAccess(req);
     const { staffId } = req.params;
 
     const staff = await User.findOne({
@@ -233,25 +221,18 @@ export const activateStaff = async (req, res, next) => {
     });
 
     if (!staff) {
-      return res.status(404).json({
-        success: false,
-        message: "Staff account not found.",
-      });
+      throw new AppError("Staff account not found.", 404);
     }
 
     if (staff.status === "ACTIVE") {
-      return res.status(400).json({
-        success: false,
-        message: "This staff account is already active.",
-      });
+      throw new AppError("This staff account is already active.", 400);
     }
 
     if (staff.status === "SUSPENDED") {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Suspended accounts cannot be reactivated through this endpoint.",
-      });
+      throw new AppError(
+        "Suspended accounts cannot be reactivated through this endpoint.",
+        403
+      );
     }
 
     staff.status = "ACTIVE";
@@ -276,7 +257,7 @@ export const activateStaff = async (req, res, next) => {
 
 export const getLeaderStatus = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
 
     const leader = await User.findOne({
       where: {
@@ -298,7 +279,7 @@ export const getLeaderStatus = async (req, res, next) => {
 
 export const updateStaff = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
     const { staffId } = req.params;
 
     const staff = await User.findOne({
@@ -312,18 +293,14 @@ export const updateStaff = async (req, res, next) => {
     });
 
     if (!staff) {
-      return res.status(404).json({
-        success: false,
-        message: "Staff account not found.",
-      });
+      throw new AppError("Staff account not found.", 404);
     }
 
     if (staff.role === "LEADER") {
-      return res.status(403).json({
-        success: false,
-        message:
-          "The school leader cannot be edited through ordinary staff management.",
-      });
+      throw new AppError(
+        "The school leader cannot be edited through ordinary staff management.",
+        403
+      );
     }
 
     const { firstName, surName, email, phoneNumber, role } = req.body;
@@ -376,7 +353,7 @@ export const resetStaffPassword = async (req, res, next) => {
 
   try {
     const { staffId } = req.params;
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
 
     // 3. Find staff within the authenticated school
     const staff = await User.findOne({
@@ -390,28 +367,23 @@ export const resetStaffPassword = async (req, res, next) => {
     });
 
     if (!staff) {
-      return res.status(404).json({
-        status: "error",
-        message: "Staff account not found.",
-      });
+      throw new AppError("Staff account not found.", 404);
     }
 
     // The leader must use a separate account-recovery process.
     if (staff.role === "LEADER") {
-      return res.status(403).json({
-        status: "error",
-        message:
-          "The school leader's password cannot be reset through staff management.",
-      });
+      throw new AppError(
+        "The school leader's password cannot be reset through staff management.",
+        403
+      );
     }
 
     // 4. A delivery address is required
     if (!staff.email) {
-      return res.status(400).json({
-        status: "error",
-        message:
-          "This staff member has no registered email address. Update their profile before resetting the password.",
-      });
+      throw new AppError(
+        "This staff member has no registered email address. Update their profile before resetting the password.",
+        400
+      );
     }
 
     // 5. Generate a cryptographically secure temporary password
@@ -445,7 +417,7 @@ export const resetStaffPassword = async (req, res, next) => {
           <p>Hello ${escapeHtml(staff.firstName)},</p>
 
           <p>
-            An authorized school administrator has initiated
+            An authorized school manager or owner has initiated
             a password reset for your ScholaNode account.
           </p>
 
@@ -475,7 +447,7 @@ export const resetStaffPassword = async (req, res, next) => {
 
           <p>
             If you did not expect this change, contact your
-            school administrator.
+            school manager or owner.
           </p>
 
           <p>
@@ -524,14 +496,16 @@ export const resetStaffPassword = async (req, res, next) => {
         }
       );
 
-      await transaction.rollback();
+      await rollbackTransaction(
+        transaction,
+        "RESET_STAFF_PASSWORD_ROLLBACK_ERROR:"
+      );
       transaction = null;
 
-      return res.status(500).json({
-        status: "error",
-        message:
-          "Failed to send the temporary password. The password reset was not completed. Please try again.",
-      });
+      throw new AppError(
+        "Failed to send the temporary password. The password reset was not completed. Please try again.",
+        500
+      );
     }
 
     // 9. Commit only after successful email delivery
@@ -550,22 +524,10 @@ export const resetStaffPassword = async (req, res, next) => {
       },
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        console.error(
-          "RESET_STAFF_PASSWORD_ROLLBACK_ERROR:",
-          rollbackError
-        );
-      }
-    }
-
-    console.error("RESET_STAFF_PASSWORD_ERROR:", {
-      url: req.originalUrl,
-      method: req.method,
-      error,
-    });
+    await rollbackTransaction(
+      transaction,
+      "RESET_STAFF_PASSWORD_ROLLBACK_ERROR:"
+    );
 
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
@@ -579,7 +541,7 @@ export const inviteStaff = async (req, res, next) => {
 
   try {
     // 1. Get the authenticated school
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
 
     // 2. Input has already been validated by Joi middleware
     const email = req.body.email;
@@ -598,14 +560,10 @@ export const inviteStaff = async (req, res, next) => {
     });
 
     if (existingUser) {
-      await transaction.rollback();
-      transaction = null;
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "A user with this email already exists in this school.",
-      });
+      throw new AppError(
+        "A user with this email already exists in this school.",
+        409
+      );
     }
 
     // 5. If inviting a principal, check whether one already exists
@@ -619,14 +577,10 @@ export const inviteStaff = async (req, res, next) => {
       });
 
       if (existingLeader) {
-        await transaction.rollback();
-        transaction = null;
-
-        return res.status(409).json({
-          success: false,
-          message:
-            "This school already has a principal. Only one principal is allowed per school.",
-        });
+        throw new AppError(
+          "This school already has a principal. Only one principal is allowed per school.",
+          409
+        );
       }
     }
 
@@ -706,14 +660,16 @@ export const inviteStaff = async (req, res, next) => {
         emailError
       );
 
-      await transaction.rollback();
+      await rollbackTransaction(
+        transaction,
+        "STAFF_INVITATION_ROLLBACK_ERROR:"
+      );
       transaction = null;
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "The invitation email could not be sent. No account was created.",
-      });
+      throw new AppError(
+        "The invitation email could not be sent. No account was created.",
+        500
+      );
     }
 
     // 11. Commit transaction
@@ -739,11 +695,7 @@ export const inviteStaff = async (req, res, next) => {
       },
     });
   } catch (error) {
-    if (transaction && !transaction.finished) {
-      await transaction.rollback();
-    }
-
-    console.error("Invite staff error:", error);
+    await rollbackTransaction(transaction, "STAFF_INVITATION_ROLLBACK_ERROR:");
     return handleControllerError(error, next, req, "STAFF_CONTROLLER_ERROR", "Unable to process this request. Please try again.");
   }
 };
@@ -753,7 +705,7 @@ export const inviteStaff = async (req, res, next) => {
 
 export const importStaffCsv = async (req, res, next) => {
   try {
-    const schoolId = await requireStaffManagementAccess(req);
+    const schoolId = req.user.schoolId;
 
     // The request has already passed importStaffCsvSchema.
     const staff = req.body.staff;
@@ -773,13 +725,11 @@ export const importStaffCsv = async (req, res, next) => {
     }
 
     if (duplicateEmails.size > 0) {
-      return next(
-        new AppError(
-          `Duplicate emails were found in the submitted records: ${[
-            ...duplicateEmails,
-          ].join(", ")}. No accounts were created.`,
-          400
-        )
+      throw new AppError(
+        `Duplicate emails were found in the submitted records: ${[
+          ...duplicateEmails,
+        ].join(", ")}. No accounts were created.`,
+        400
       );
     }
 
@@ -805,11 +755,9 @@ export const importStaffCsv = async (req, res, next) => {
     );
 
     if (conflictingEmails.length > 0) {
-      return next(
-        new AppError(
-          `These emails already belong to users in this school: ${conflictingEmails.join(", ")}. No accounts were created.`,
-          409
-        )
+      throw new AppError(
+        `These emails already belong to users in this school: ${conflictingEmails.join(", ")}. No accounts were created.`,
+        409
       );
     }
 

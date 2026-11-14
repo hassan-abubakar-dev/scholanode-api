@@ -32,7 +32,7 @@ const pricingConfig = {
       id: "STARTER_501_700",
       minStudents: 501,
       maxStudents: 700,
-      MONTHLY: { price: 1100, asLowAs: 1.57 },
+      MONTHLY: { price: 100, asLowAs: 1.57 },
       TERMLY: { price: 1200, asLowAs: 1.71 },
       YEARLY: { price: 1300, asLowAs: 1.86 },
     },

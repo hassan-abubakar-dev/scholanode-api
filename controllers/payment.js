@@ -646,19 +646,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
     const { plan, tierId, billingCycle } = req.body;
     const { schoolId } = req.params;
 
-    // 1. Verify the authenticated user's authorization.
-    if (
-      !req.user ||
-      req.user.schoolId !== schoolId ||
-      !MANAGER_ROLES.includes(req.user.role)
-    ) {
-      throw new AppError(
-        "You are not authorized to upgrade this school's subscription.",
-        403
-      );
-    }
-
-    // 2. Retrieve the authenticated user's email from the database.
+    // 1. Retrieve the authenticated user's email from the database.
     const user = await User.findByPk(req.user.id, {
       attributes: ["id", "email", "schoolId"],
     });
