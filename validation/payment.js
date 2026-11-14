@@ -8,32 +8,35 @@ export const initializePaymentParamSchema = Joi.object({
 }).required();
 
 export const initializePaymentBodySchema = Joi.object({
-  email: Joi.string().trim().lowercase().email().required().messages({
-    "string.empty": "Email is required.",
-    "string.email": "Please provide a valid email address.",
-    "any.required": "Email is required.",
-  }),
-
-  plan: Joi.string().trim().uppercase().valid("STARTER", "STANDARD", "PROFESSIONAL").required().messages({
-    "string.empty": "Plan is required.",
-    "any.only": "Plan must be STARTER, STANDARD, or PROFESSIONAL.",
-    "any.required": "Plan is required.",
-  }),
-
-  tierId: Joi.string().trim().required()
+  plan: Joi.string()
+    .trim()
+    .uppercase()
+    .valid("STARTER", "STANDARD", "PROFESSIONAL")
+    .required()
     .messages({
+      "string.empty": "Plan is required.",
+      "any.only": "Plan must be STARTER, STANDARD, or PROFESSIONAL.",
+      "any.required": "Plan is required.",
+    }),
+
+  tierId: Joi.string()
+    .trim()
+    .required()
+    .messages({
+      "string.empty": "Tier ID is required.",
       "any.required": "Tier ID is required.",
     }),
 
-  billingCycle: Joi.string().trim().uppercase().valid("MONTHLY", "TERMLY", "YEARLY").required().messages({
-    "string.empty": "Billing cycle is required.",
-    "any.only": "Billing cycle must be MONTHLY, TERMLY, or YEARLY.",
-    "any.required": "Billing cycle is required.",
-  }),
-
-  metadata: Joi.object().unknown(true).optional(),
-
-  callback_url: Joi.string().uri().optional(),
+  billingCycle: Joi.string()
+    .trim()
+    .uppercase()
+    .valid("MONTHLY", "TERMLY", "YEARLY")
+    .required()
+    .messages({
+      "string.empty": "Billing cycle is required.",
+      "any.only": "Billing cycle must be MONTHLY, TERMLY, or YEARLY.",
+      "any.required": "Billing cycle is required.",
+    }),
 }).required();
 
 export const paymentStatusParamSchema = Joi.object({

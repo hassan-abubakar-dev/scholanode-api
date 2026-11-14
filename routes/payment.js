@@ -27,8 +27,6 @@ const router = express.Router();
 
 router.post(
   "/schools/:schoolId/initialize",
-  protectRoutes,
-  authorizeSchoolManagement,
   validate(initializePaymentParamSchema, "params"),
   validate(initializePaymentBodySchema, "body"),
   initializePayment
@@ -76,8 +74,6 @@ router.get(
 
 router.get(
   "/:reference/status",
-  protectRoutes,
-  authorizeSchoolManagement,
   validate(paymentStatusParamSchema, "params"),
   getPaymentStatus
 );

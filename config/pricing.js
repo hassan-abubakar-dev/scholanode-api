@@ -2,8 +2,9 @@
 const pricingConfig = {
   FREE: {
     plan: "FREE",
-    maxStudents: null, // Unlimited students
+    maxStudents: null,
     trialDays: 120,
+    trialMinutes: 5, // TEMPORARY TEST: 5 minutes
     status: "TRIAL",
     billingCycle: null,
     price: 0,
@@ -15,57 +16,57 @@ const pricingConfig = {
       id: "STARTER_1_300",
       minStudents: 1,
       maxStudents: 300,
-      MONTHLY: { price: 15000, asLowAs: 50 },
-      TERMLY: { price: 35000, asLowAs: 116.67 },
-      YEARLY: { price: 100000, asLowAs: 333.33 },
+      MONTHLY: { price: 500, asLowAs: 1.67 },
+      TERMLY: { price: 600, asLowAs: 2 },
+      YEARLY: { price: 700, asLowAs: 2.33 },
     },
     {
       id: "STARTER_301_500",
       minStudents: 301,
       maxStudents: 500,
-      MONTHLY: { price: 22000, asLowAs: 44 },
-      TERMLY: { price: 50000, asLowAs: 100 },
-      YEARLY: { price: 140000, asLowAs: 280 },
+      MONTHLY: { price: 800, asLowAs: 1.6 },
+      TERMLY: { price: 900, asLowAs: 1.8 },
+      YEARLY: { price: 1000, asLowAs: 2 },
     },
     {
       id: "STARTER_501_700",
       minStudents: 501,
       maxStudents: 700,
-      MONTHLY: { price: 30000, asLowAs: 42.86 },
-      TERMLY: { price: 70000, asLowAs: 100 },
-      YEARLY: { price: 190000, asLowAs: 271.43 },
+      MONTHLY: { price: 1100, asLowAs: 1.57 },
+      TERMLY: { price: 1200, asLowAs: 1.71 },
+      YEARLY: { price: 1300, asLowAs: 1.86 },
     },
     {
       id: "STARTER_701_1000",
       minStudents: 701,
       maxStudents: 1000,
-      MONTHLY: { price: 40000, asLowAs: 40 },
-      TERMLY: { price: 95000, asLowAs: 95 },
-      YEARLY: { price: 260000, asLowAs: 260 },
+      MONTHLY: { price: 1400, asLowAs: 1.4 },
+      TERMLY: { price: 1500, asLowAs: 1.5 },
+      YEARLY: { price: 1600, asLowAs: 1.6 },
     },
     {
       id: "STARTER_1001_1500",
       minStudents: 1001,
       maxStudents: 1500,
-      MONTHLY: { price: 55000, asLowAs: 36.67 },
-      TERMLY: { price: 130000, asLowAs: 86.67 },
-      YEARLY: { price: 350000, asLowAs: 233.33 },
+      MONTHLY: { price: 1700, asLowAs: 1.13 },
+      TERMLY: { price: 1800, asLowAs: 1.2 },
+      YEARLY: { price: 1900, asLowAs: 1.27 },
     },
     {
       id: "STARTER_1501_2000",
       minStudents: 1501,
       maxStudents: 2000,
-      MONTHLY: { price: 70000, asLowAs: 35 },
-      TERMLY: { price: 165000, asLowAs: 82.5 },
-      YEARLY: { price: 450000, asLowAs: 225 },
+      MONTHLY: { price: 2000, asLowAs: 1 },
+      TERMLY: { price: 2100, asLowAs: 1.05 },
+      YEARLY: { price: 2200, asLowAs: 1.1 },
     },
     {
       id: "STARTER_2001_UNLIMITED",
       minStudents: 2001,
       maxStudents: null,
-      MONTHLY: { price: 85000, asLowAs: null },
-      TERMLY: { price: 200000, asLowAs: null },
-      YEARLY: { price: 550000, asLowAs: null },
+      MONTHLY: { price: 2300, asLowAs: null },
+      TERMLY: { price: 2400, asLowAs: null },
+      YEARLY: { price: 2500, asLowAs: null },
       message: "Price based on your number of students",
     },
   ],
@@ -74,6 +75,9 @@ const pricingConfig = {
 
   PROFESSIONAL: [],
 };
+
+// TEMPORARY TEST CONFIGURATION
+export const SUBSCRIPTION_TEST_DURATION_MINUTES = 5;
 
 export const SUBSCRIPTION_DURATIONS_DAYS = Object.freeze({
   MONTHLY: 30,
@@ -103,11 +107,27 @@ export const calculateSubscriptionExpiry = (
     );
   }
 
-  return calculateExpiry(startDate, days);
+  const date = new Date(startDate);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid subscription start date");
+  }
+
+  return new Date(
+    date.getTime() + SUBSCRIPTION_TEST_DURATION_MINUTES * 60 * 1000
+  );
 };
 
 export const calculateTrialExpiry = (startDate = new Date()) => {
-  return calculateExpiry(startDate, pricingConfig.FREE.trialDays);
+  const date = new Date(startDate);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid subscription start date");
+  }
+
+  return new Date(
+    date.getTime() + pricingConfig.FREE.trialMinutes * 60 * 1000
+  );
 };
 
 export default pricingConfig;

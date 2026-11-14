@@ -6,7 +6,10 @@ import {
   School,
   SubscriptionPlan,
   Student,
+  Owner,
+  User,
 } from "../relationships/associations.js";
+import verifyInitialPaymentToken from "../utils/verifyInitialPaymentToken.js";
 
 import {
   resolvePricing,
@@ -77,24 +80,49 @@ const resolvePaymentMetadata = (metadata, schoolId) => {
 const isDefiniteProviderFailure = (error) =>
   Boolean(error?.response && error.response.status >= 400);
 
+
 export const initializePayment = async (req, res, next) => {
   let payment;
 
   try {
-    const { email, plan, tierId, billingCycle } = req.body;
+    const { plan, tierId, billingCycle } = req.body;
     const { schoolId } = req.params;
 
+    // 1. Extract and validate the temporary initial-payment token.
+    const authorization = req.headers.authorization;
+
     if (
-      !req.user ||
-      req.user.schoolId !== schoolId ||
-      !MANAGER_ROLES.includes(req.user.role)
+      typeof authorization !== "string" ||
+      !authorization.startsWith("Bearer ")
     ) {
+      throw new AppError(
+        "Initial payment authorization token is required.",
+        401
+      );
+    }
+
+    const token = authorization.slice(7).trim();
+
+    if (!token) {
+      throw new AppError(
+        "Initial payment authorization token is required.",
+        401
+      );
+    }
+
+    const {
+      userId,
+      schoolId: authorizedSchoolId,
+    } = verifyInitialPaymentToken(token);
+
+    if (authorizedSchoolId !== schoolId) {
       throw new AppError(
         "You are not authorized to initialize payment for this school.",
         403
       );
     }
 
+    // 2. Confirm that the school exists.
     const school = await School.findByPk(schoolId);
 
     if (!school) {
@@ -108,6 +136,38 @@ export const initializePayment = async (req, res, next) => {
       );
     }
 
+    // 3. Confirm that the token belongs to a verified user of this school.
+    const user = await User.findOne({
+      where: {
+        id: userId,
+        schoolId,
+        isEmailVerified: true,
+      },
+    });
+
+    if (!user) {
+      throw new AppError(
+        "The verified account associated with this payment session could not be found.",
+        403
+      );
+    }
+
+    // 4. Confirm that this user is the school's registered owner.
+    const owner = await Owner.findOne({
+      where: {
+        userId,
+        schoolId,
+      },
+    });
+
+    if (!owner) {
+      throw new AppError(
+        "You are not authorized to make the initial payment for this school.",
+        403
+      );
+    }
+
+    // 5. Ensure the school has not already received a subscription.
     const existingSubscription = await SubscriptionPlan.findOne({
       where: { schoolId },
     });
@@ -119,6 +179,7 @@ export const initializePayment = async (req, res, next) => {
       );
     }
 
+    // 6. Validate the requested pricing selection.
     let pricing;
 
     try {
@@ -134,6 +195,7 @@ export const initializePayment = async (req, res, next) => {
       );
     }
 
+    // 7. Ensure the selection matches the school's saved registration details.
     if (
       school.selectedPlan !== pricing.plan ||
       String(school.selectedTierId) !== String(pricing.tierId) ||
@@ -145,6 +207,7 @@ export const initializePayment = async (req, res, next) => {
       );
     }
 
+    // 8. Prevent duplicate active payment attempts.
     const activeAttempt = await Payment.findOne({
       where: {
         schoolId,
@@ -159,6 +222,7 @@ export const initializePayment = async (req, res, next) => {
       );
     }
 
+    // 9. Create the payment record.
     const reference = `SCH_PAY_${crypto.randomUUID()}`;
     const metadata = paymentMetadata(pricing, schoolId);
 
@@ -172,13 +236,14 @@ export const initializePayment = async (req, res, next) => {
       metadata,
     });
 
+    // 10. Initialize payment with Paystack.
     let paystackResponse;
 
     try {
       paystackResponse = await axios.post(
         `${PAYSTACK_URL}/transaction/initialize`,
         {
-          email,
+          email: user.email,
           amount: Math.round(Number(pricing.price) * 100),
           reference,
           metadata,
@@ -186,8 +251,6 @@ export const initializePayment = async (req, res, next) => {
         { headers: paystackHeaders() }
       );
     } catch (error) {
-      // Only mark FAILED if the payment is still PENDING.
-      // A webhook may already have processed it.
       if (isDefiniteProviderFailure(error)) {
         await Payment.update(
           { status: "FAILED" },
@@ -203,8 +266,7 @@ export const initializePayment = async (req, res, next) => {
       throw error;
     }
 
-    // Only transition PENDING -> PROCESSING.
-    // Never overwrite a status already changed by the webhook.
+    // 11. Transition PENDING -> PROCESSING.
     await Payment.update(
       { status: "PROCESSING" },
       {
@@ -215,6 +277,7 @@ export const initializePayment = async (req, res, next) => {
       }
     );
 
+    // 12. Return payment details.
     return res.status(200).json({
       success: true,
       message: "Payment initialized successfully.",
@@ -580,9 +643,10 @@ export const initializeUpgradePayment = async (req, res, next) => {
   let transaction;
 
   try {
-    const { email, plan, tierId, billingCycle, callback_url } = req.body;
+    const { plan, tierId, billingCycle } = req.body;
     const { schoolId } = req.params;
 
+    // 1. Verify the authenticated user's authorization.
     if (
       !req.user ||
       req.user.schoolId !== schoolId ||
@@ -594,8 +658,25 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
+    // 2. Retrieve the authenticated user's email from the database.
+    const user = await User.findByPk(req.user.id, {
+      attributes: ["id", "email", "schoolId"],
+    });
+
+    if (
+      !user ||
+      user.schoolId !== schoolId ||
+      !user.email
+    ) {
+      throw new AppError(
+        "The authenticated user's email could not be verified.",
+        403
+      );
+    }
+
     let pricing;
 
+    // 3. Resolve and validate the requested pricing.
     try {
       pricing = resolvePricing({
         plan,
@@ -613,6 +694,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
+    // 4. Begin database transaction.
     transaction = await dbConnection.transaction();
 
     const school = await School.findByPk(schoolId, {
@@ -631,6 +713,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
+    // 5. Retrieve and lock the current subscription.
     const currentSubscription = await SubscriptionPlan.findOne({
       where: { schoolId },
       transaction,
@@ -644,16 +727,14 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
-    if (
-      !["ACTIVE", "TRIAL"].includes(currentSubscription.status)
-    ) {
+    if (!["ACTIVE", "TRIAL"].includes(currentSubscription.status)) {
       throw new AppError(
         "Your current subscription is not eligible for an upgrade.",
         409
       );
     }
 
-    // Do not allow upgrades from an already expired subscription.
+    // 6. Prevent upgrades from expired subscriptions.
     const currentEndDate =
       currentSubscription.subscriptionEndsAt ||
       currentSubscription.trialEndsAt;
@@ -668,6 +749,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
+    // 7. Validate that the requested plan is a legitimate upgrade.
     try {
       assertSubscriptionUpgrade({
         currentSubscription,
@@ -677,7 +759,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       throw new AppError(error.message, 400);
     }
 
-    // Verify the target capacity against actual active students.
+    // 8. Verify the target capacity against active students.
     const activeStudents = await Student.count({
       where: {
         schoolId,
@@ -696,7 +778,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
-    // Prevent concurrent payment attempts for this school.
+    // 9. Prevent concurrent payment attempts for this school.
     const activeAttempt = await Payment.findOne({
       where: {
         schoolId,
@@ -715,6 +797,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
+    // 10. Generate payment reference and backend metadata.
     const reference = `SCH_PAY_${crypto.randomUUID()}`;
 
     const metadata = paymentMetadata(
@@ -724,6 +807,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       currentSubscription
     );
 
+    // 11. Create payment record.
     payment = await Payment.create(
       {
         schoolId,
@@ -740,17 +824,17 @@ export const initializeUpgradePayment = async (req, res, next) => {
     await transaction.commit();
     transaction = null;
 
+    // 12. Initialize payment with Paystack.
     let paystackResponse;
 
     try {
       paystackResponse = await axios.post(
         `${PAYSTACK_URL}/transaction/initialize`,
         {
-          email,
+          email: user.email,
           amount: Math.round(Number(pricing.price) * 100),
           reference,
           metadata,
-          ...(callback_url ? { callback_url } : {}),
         },
         {
           headers: paystackHeaders(),
@@ -772,6 +856,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       throw error;
     }
 
+    // 13. Transition payment from PENDING to PROCESSING.
     await Payment.update(
       { status: "PROCESSING" },
       {
@@ -782,6 +867,7 @@ export const initializeUpgradePayment = async (req, res, next) => {
       }
     );
 
+    // 14. Return payment details.
     return res.status(200).json({
       success: true,
       message: "Subscription upgrade payment initialized successfully.",

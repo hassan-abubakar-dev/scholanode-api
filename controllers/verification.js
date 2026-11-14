@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { User, VerificationCode, School } from "../relationships/associations.js";
 import AppError from "../utils/AppError.js";
 import generateToken from "../utils/token.js";
@@ -6,6 +7,7 @@ import { createFreeSubscriptionForSchool } from "../services/subscription.js";
 import pricingConfig from "../config/pricing.js";
 import { resolvePricing } from "../services/pricing.js";
 import issueVerificationCode from "../services/verificationCode.js";
+
 
 import dotenv from "dotenv";
 
@@ -73,6 +75,7 @@ const passwordResetResponse = {
  *   "code": "123456"
  * }
  */
+
 export const verifyNewSchoolAccount = async (req, res, next) => {
     let transaction;
 
@@ -205,8 +208,26 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
             );
         }
 
-        // 8. Handle FREE and PAID registration differently.
-        if (selectedPricing.plan === pricingConfig.FREE.plan) {
+        // 8. Determine whether initial payment is required.
+        const requiresPayment =
+            selectedPricing.plan !== pricingConfig.FREE.plan;
+
+        // Ensure payment-token configuration exists before committing.
+        if (
+            requiresPayment &&
+            (
+                !process.env.INITIAL_PAYMENT_TOKEN_KEY ||
+                !process.env.INITIAL_PAYMENT_TOKEN_EXPIRY
+            )
+        ) {
+            throw new AppError(
+                "Initial payment token configuration is missing.",
+                500
+            );
+        }
+
+        // 9. Handle FREE and PAID registration differently.
+        if (!requiresPayment) {
             // Create the FREE subscription.
             await createFreeSubscriptionForSchool({
                 school,
@@ -225,16 +246,48 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
 
         await school.save({ transaction });
 
-        // 9. Consume only the code that was verified.
+        // 10. Consume only the code that was verified.
         await existingCode.destroy({ transaction });
 
-        // 10. Commit all changes together.
+        // 11. Commit all verification and school changes together.
         await transaction.commit();
 
+        // 12. Generate the temporary payment token only after commit.
+        let paymentToken = null;
+
+        if (requiresPayment) {
+            paymentToken = generateToken(
+                {
+                    id: user.id,
+                    schoolId: school.id,
+                    purpose: "initial_payment",
+                },
+                process.env.INITIAL_PAYMENT_TOKEN_KEY,
+                process.env.INITIAL_PAYMENT_TOKEN_EXPIRY
+            );
+        }
+
+        // 13. Return verification result.
         return res.status(200).json({
             status: "success",
             message: "Email verified successfully.",
+            data: {
+                schoolId: school.id,
+                schoolStatus: school.status,
+                paymentRequired: requiresPayment,
+
+                ...(requiresPayment && {
+                    paymentToken,
+                    payment: {
+                        plan: selectedPricing.plan,
+                        tierId: selectedPricing.tierId,
+                        billingCycle: selectedPricing.billingCycle,
+                        amount: selectedPricing.price,
+                    },
+                }),
+            },
         });
+
     } catch (error) {
         if (transaction && !transaction.finished) {
             await transaction.rollback();
@@ -261,6 +314,7 @@ export const verifyNewSchoolAccount = async (req, res, next) => {
         );
     }
 };
+
 
 /**
  * Verify a password-recovery code.

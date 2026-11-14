@@ -88,6 +88,12 @@ role: {
   },
 },
 
+isEmailVerified: {
+  type: DataTypes.BOOLEAN,
+  allowNull: false,
+  defaultValue: false,
+},
+
     phoneNumber: {
       type: DataTypes.STRING(20),
       allowNull: true,
