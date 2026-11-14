@@ -1,6 +1,5 @@
 import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
+import cors from './config/cors.js';
 import cookieParser from "cookie-parser";
 import { dbConnection, testConnection } from './config/db.js';
 import "./relationships/associations.js";
@@ -44,79 +43,21 @@ import assessmentConfigurationRouter from "./routes/assessmentConfiguration.js";
 
 
 
-
-dotenv.config();
-
 const app = express();
 const httpServer = createServer(app);
 
-// Comma-separated list of exact browser origins allowed in production.
-// Example: CLIENT_ORIGINS=https://app.scholanode.com,https://admin.scholanode.com
-const configuredOrigins = String(process.env.CLIENT_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim().replace(/\/$/, ""))
-  .filter(Boolean);
+// CORS must run before application routes and body parsing.
+app.use(cors);
 
-// In development the frontend may be opened from localhost, a LAN IP (phone
-// testing), or a tunnel, on any Vite port — so private-network origins are
-// allowed there. Production only accepts CLIENT_ORIGINS.
-const isLocalDevelopmentOrigin = (origin) => {
-  try {
-    const { hostname } = new URL(origin);
-
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)
-    );
-  } catch {
-    return false;
-  }
-};
-
-// before express.json() middleware, set up CORS
+// Paystack webhook must receive the raw request body.
 app.post(
-    "/api/payments/webhook",
-    express.raw({ type: "application/json" }),
-    handlePaystackWebhook
-
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  handlePaystackWebhook
 );
 
-
-// Middleware
+// Other middleware
 app.use(express.json());
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests without an Origin header, such as Postman or curl.
-      if (!origin) return callback(null, true);
-
-      const normalizedOrigin = origin.replace(/\/$/, "");
-
-      if (configuredOrigins.includes(normalizedOrigin)) {
-        return callback(null, true);
-      }
-
-      if (
-        process.env.NODE_ENV !== "production" &&
-        isLocalDevelopmentOrigin(normalizedOrigin)
-      ) {
-        return callback(null, true);
-      }
-
-      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
-    },
-
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-
 app.use(cookieParser());
 
 

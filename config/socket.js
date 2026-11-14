@@ -1,47 +1,11 @@
+
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 
 import { User } from "../relationships/associations.js";
+import { isOriginAllowed } from "./cors.js";
 
 let io;
-
-const getAllowedOrigins = () => {
-  return String(process.env.CLIENT_ORIGINS || "")
-    .split(",")
-    .map((origin) => origin.trim().replace(/\/$/, ""))
-    .filter(Boolean);
-};
-
-const isLocalDevelopmentOrigin = (origin) => {
-  try {
-    const { hostname } = new URL(origin);
-
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
-      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)
-    );
-  } catch {
-    return false;
-  }
-};
-
-const isOriginAllowed = (origin) => {
-  if (!origin) return true;
-
-  const normalizedOrigin = origin.replace(/\/$/, "");
-
-  if (getAllowedOrigins().includes(normalizedOrigin)) {
-    return true;
-  }
-
-  return (
-    process.env.NODE_ENV !== "production" &&
-    isLocalDevelopmentOrigin(normalizedOrigin)
-  );
-};
 
 export const initializeSocket = (httpServer) => {
   io = new Server(httpServer, {
@@ -56,6 +20,12 @@ export const initializeSocket = (httpServer) => {
         );
       },
       credentials: true,
+    },
+
+    // Enforce the same origin policy for incoming connections,
+    // including WebSocket handshakes.
+    allowRequest: (req, callback) => {
+      callback(null, isOriginAllowed(req.headers.origin));
     },
   });
 
