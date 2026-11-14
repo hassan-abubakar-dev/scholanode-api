@@ -47,6 +47,7 @@ for (const [modulePath, names] of [
 
 const {
   authorizeAcademicRead,
+  authorizeAcademicManagement,
   authorizeSchoolManagement,
   protectRoutes,
 } = await import("../middleware/auth.js");
@@ -149,29 +150,45 @@ test("only the intended GET routes use academic read, after authentication", asy
   }
 });
 
-test("session, class, subject and working-days write permissions stay unchanged", async () => {
+test("general academic setup writes use school management authorization", async (t) => {
   const writeRoutes = [...routes(academicSetup), ...routes(sessionTerm)]
     .filter((route) => !route.methods.get && route.path !== "/assessment-configuration");
   assert.equal(writeRoutes.length, 9);
   for (const route of writeRoutes) {
     assert.equal(route.stack[0].handle, protectRoutes);
-    for (const role of roles) {
-      const error = await authorizeWith(route.stack[1].handle, { user: user(role) });
-      if (["LEADER", "VICE_LEADER", "ADMINISTRATOR"].includes(role)) {
-        assert.equal(error, undefined);
-      } else {
-        assert.equal(error.statusCode, 403);
-      }
+    assert.equal(route.stack[1].handle, authorizeSchoolManagement);
+    for (const role of ["LEADER", "VICE_LEADER", "ADMINISTRATOR"]) {
+      assert.equal(
+        await authorizeWith(route.stack[1].handle, { user: user(role) }),
+        undefined
+      );
     }
   }
+
+  t.mock.method(Owner, "findOne", async ({ where }) => (
+    where.userId === "owner-1" ? { id: "owner-1" } : null
+  ));
+  assert.equal(
+    await authorizeWith(authorizeSchoolManagement, {
+      user: { ...user("OWNER"), id: "owner-1" },
+    }),
+    undefined
+  );
+  assert.equal(
+    (await authorizeWith(authorizeSchoolManagement, {
+      user: user("EXAM_OFFICER"),
+    })).statusCode,
+    403
+  );
 });
 
-test("assessment CREATE and UPDATE remain restricted even for verified owners", async (t) => {
+test("assessment configuration writes use academic management authorization", async (t) => {
   const lookup = t.mock.method(Owner, "findOne", async () => ({ id: "owner-1" }));
   const create = routes(academicSetup).find((route) => route.path === "/assessment-configuration");
   const update = routes(assessment).find((route) => route.methods.put);
   assert.equal(create.stack[0].handle, protectRoutes);
-  assert.equal(assessment.stack[0].handle, protectRoutes);
+  assert.equal(create.stack[1].handle, authorizeAcademicManagement);
+  assert.equal(update.stack[0].handle, authorizeAcademicManagement);
   for (const guard of [create.stack[1].handle, update.stack[0].handle]) {
     for (const role of roles) {
       const error = await authorizeWith(guard, { user: user(role) });
@@ -183,6 +200,14 @@ test("assessment CREATE and UPDATE remain restricted even for verified owners", 
     }
   }
   assert.equal(lookup.mock.callCount(), 0);
+});
+
+test("assessment configuration reads use academic read authorization", () => {
+  const reads = routes(assessment).filter((route) => route.methods.get);
+  assert.equal(reads.length, 3);
+  for (const route of reads) {
+    assert.equal(route.stack[0].handle, authorizeAcademicRead);
+  }
 });
 
 const payload = (maximumMark = 100, educationSection = "EARLY_YEARS") => ({

@@ -27,6 +27,53 @@ const clearSchoolSelection = async (school, transaction) => {
   await school.save({ transaction });
 };
 
+export const assertPaidSubscriptionSelection = ({
+  currentSubscription,
+  targetPricing,
+  at = new Date(),
+}) => {
+  if (!currentSubscription || !targetPricing) {
+    throw new Error("Current subscription and target pricing are required.");
+  }
+
+  if (currentSubscription.status === "SUSPENDED") {
+    throw new Error("A suspended subscription cannot be renewed or upgraded.");
+  }
+
+  if (!["ACTIVE", "TRIAL", "EXPIRED"].includes(currentSubscription.status)) {
+    throw new Error("The existing subscription is not eligible for payment.");
+  }
+
+  const endDate =
+    currentSubscription.subscriptionEndsAt ||
+    currentSubscription.trialEndsAt;
+  const referenceTime = new Date(at).getTime();
+
+  if (Number.isNaN(referenceTime)) {
+    throw new Error("A valid subscription evaluation date is required.");
+  }
+
+  const hasEndDate = endDate !== null && endDate !== undefined;
+  const endTime = hasEndDate ? new Date(endDate).getTime() : null;
+
+  if (hasEndDate && Number.isNaN(endTime)) {
+    throw new Error("The existing subscription has an invalid expiry date.");
+  }
+
+  const isExpired =
+    currentSubscription.status === "EXPIRED" ||
+    (hasEndDate && endTime <= referenceTime);
+
+  if (!isExpired) {
+    assertSubscriptionUpgrade({
+      currentSubscription,
+      targetPricing,
+    });
+  }
+
+  return isExpired;
+};
+
 export const createFreeSubscriptionForSchool = async ({
   school,
   transaction,
@@ -149,6 +196,12 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
 
   // INITIAL ACTIVATION
   if (purpose === "INITIAL_ACTIVATION") {
+    if (school.status !== "PENDING_ACTIVATION") {
+      throw new Error(
+        "Only schools pending activation can complete initial payment."
+      );
+    }
+
     if (
       school.selectedPlan !== pricing.plan ||
       String(school.selectedTierId) !== String(pricing.tierId) ||
@@ -215,28 +268,10 @@ export const createPaidSubscriptionFromVerifiedPayment = async ({
     );
   }
 
-  if (!["ACTIVE", "TRIAL"].includes(existingSubscription.status)) {
-    throw new Error(
-      "The existing subscription is no longer eligible for an upgrade."
-    );
-  }
-
-  const currentEndDate =
-    existingSubscription.subscriptionEndsAt ||
-    existingSubscription.trialEndsAt;
-
-  if (
-    currentEndDate &&
-    paidAt.getTime() >= new Date(currentEndDate).getTime()
-  ) {
-    throw new Error(
-      "The existing subscription expired before this upgrade payment was completed."
-    );
-  }
-
-  assertSubscriptionUpgrade({
+  assertPaidSubscriptionSelection({
     currentSubscription: existingSubscription,
     targetPricing: pricing,
+    at: paidAt,
   });
 
   // Recheck capacity because student numbers may have changed

@@ -74,6 +74,8 @@ router.get(
 
 router.get(
   "/:reference/status",
+  protectRoutes,
+  authorizeSchoolManagement,
   validate(paymentStatusParamSchema, "params"),
   getPaymentStatus
 );

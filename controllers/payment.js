@@ -11,22 +11,18 @@ import {
 } from "../relationships/associations.js";
 import verifyInitialPaymentToken from "../utils/verifyInitialPaymentToken.js";
 
-import {
-  resolvePricing,
-  assertSubscriptionUpgrade,
-} from "../services/pricing.js";
+import { resolvePricing } from "../services/pricing.js";
 import { dbConnection } from "../config/db.js";
 
 import {
   createPaidSubscriptionFromVerifiedPayment,
+  assertPaidSubscriptionSelection,
 } from "../services/subscription.js";
 import { handleControllerError } from "../utils/controllerError.js";
 import AppError from "../utils/AppError.js";
 
 const PAYSTACK_URL = "https://api.paystack.co";
 const PAYMENT_CURRENCY = "NGN";
-const MANAGER_ROLES = ["LEADER", "VICE_LEADER", "ADMINISTRATOR"];
-
 const paystackHeaders = () => ({
   Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
   "Content-Type": "application/json",
@@ -458,11 +454,7 @@ export const getPaymentStatus = async (req, res, next) => {
     const payment = await Payment.findOne({ where: { reference } });
 
     if (!payment) throw new AppError("Payment not found.", 404);
-    if (
-      !req.user ||
-      req.user.schoolId !== payment.schoolId ||
-      !MANAGER_ROLES.includes(req.user.role)
-    ) {
+    if (req.user?.schoolId !== payment.schoolId) {
       throw new AppError(
         "You are not authorized to access this payment.",
         403
@@ -715,33 +707,12 @@ export const initializeUpgradePayment = async (req, res, next) => {
       );
     }
 
-    if (!["ACTIVE", "TRIAL"].includes(currentSubscription.status)) {
-      throw new AppError(
-        "Your current subscription is not eligible for an upgrade.",
-        409
-      );
-    }
-
-    // 6. Prevent upgrades from expired subscriptions.
-    const currentEndDate =
-      currentSubscription.subscriptionEndsAt ||
-      currentSubscription.trialEndsAt;
-
-    if (
-      currentEndDate &&
-      new Date(currentEndDate).getTime() <= Date.now()
-    ) {
-      throw new AppError(
-        "Your current subscription has expired. Please resolve its status before upgrading.",
-        409
-      );
-    }
-
     // 7. Validate that the requested plan is a legitimate upgrade.
     try {
-      assertSubscriptionUpgrade({
+      assertPaidSubscriptionSelection({
         currentSubscription,
         targetPricing: pricing,
+        at: new Date(),
       });
     } catch (error) {
       throw new AppError(error.message, 400);

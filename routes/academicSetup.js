@@ -7,7 +7,12 @@ import {
   createAssessmentConfiguration,
   getAcademicSetupProgress,
 } from "../controllers/academicSetup.js";
-import { authorize, authorizeAcademicRead, protectRoutes } from "../middleware/auth.js";
+import {
+  authorizeAcademicManagement,
+  authorizeAcademicRead,
+  authorizeSchoolManagement,
+  protectRoutes,
+} from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import {
   createSessionWithTermsSchema,
@@ -23,7 +28,7 @@ const router = express.Router();
 router.post(
   "/session",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(createSessionWithTermsSchema, "body"),
   createSessionWithTerms
 );
@@ -32,7 +37,7 @@ router.post(
 router.post(
   "/class",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(createClassSchema, "body"),
   createClass
 );
@@ -41,7 +46,7 @@ router.post(
 router.post(
   "/subject",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(createSubjectSchema, "body"),
   createSubject
 );
@@ -50,7 +55,7 @@ router.post(
 router.post(
   "/working-days",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(saveWorkingDaysSchema, "body"),
   saveWorkingDays
 );
@@ -59,7 +64,7 @@ router.post(
 router.post(
   "/assessment-configuration",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "EXAM_OFFICER"),
+  authorizeAcademicManagement,
   validate(createAssessmentConfigurationSchema, "body"),
   createAssessmentConfiguration
 );

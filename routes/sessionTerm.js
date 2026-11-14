@@ -1,5 +1,9 @@
 import express from "express";
-import { authorize, authorizeAcademicRead, protectRoutes } from "../middleware/auth.js";
+import {
+  authorizeAcademicRead,
+  authorizeSchoolManagement,
+  protectRoutes,
+} from "../middleware/auth.js";
 import {
   getAllSessionsAndTerms, updateSessionWithTerms, activateSession, completeSession, activateTerm, completeTerm
 } from "../controllers/sessionTerm.js";
@@ -23,7 +27,7 @@ router.get(
 router.patch(
   "/session/:sessionId",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(sessionParamsSchema, "params"),
   validate(updateSessionWithTermsSchema, "body"),
   updateSessionWithTerms
@@ -34,7 +38,7 @@ router.patch(
 router.patch(
   "/:sessionId/activate",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(sessionParamsSchema, "params"),
   activateSession
 );
@@ -42,7 +46,7 @@ router.patch(
 router.patch(
   "/:sessionId/complete",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(sessionParamsSchema, "params"),
   completeSession
 );
@@ -51,7 +55,7 @@ router.patch(
 router.patch(
   "/:sessionId/terms/:termId/activate",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(sessionTermParamsSchema, "params"),
   activateTerm
 );
@@ -59,7 +63,7 @@ router.patch(
 router.patch(
   "/:sessionId/terms/:termId/complete",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(sessionTermParamsSchema, "params"),
   completeTerm
 );

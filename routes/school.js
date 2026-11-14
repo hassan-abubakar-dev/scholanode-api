@@ -14,7 +14,10 @@ import {
   createSubjectSetup
 } from "../controllers/school.js";
 
-import { authorize, protectRoutes } from "../middleware/auth.js";
+import {
+  authorizeSchoolManagement,
+  protectRoutes,
+} from "../middleware/auth.js";
 import validate from "../middleware/validation.js";
 import {
   registerSchoolValidationSchema,
@@ -40,6 +43,7 @@ router.post(
 router.get(
   "/setup-progress",
   protectRoutes,
+  authorizeSchoolManagement,
   getSchoolSetupProgress
 );
 
@@ -65,7 +69,7 @@ router.get(
 router.get(
   "/my-school",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   getMySchool
 );
 
@@ -73,7 +77,7 @@ router.get(
 router.patch(
   "/my-school/setup",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(updateSchoolSetupSchema, "body"),
   updateSchoolSetup
 );
@@ -82,7 +86,7 @@ router.patch(
 router.post(
   "/my-school/logo/upload-url",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(schoolLogoUploadUrlValidationSchema, "body"),
   requestSchoolLogoUpload
 );
@@ -91,7 +95,7 @@ router.post(
 router.patch(
   "/my-school/logo",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(confirmSchoolLogoUploadValidationSchema, "body"),
   confirmSchoolLogoUpload
 );
@@ -100,7 +104,7 @@ router.patch(
 router.post(
   "/my-school/academic-setup",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(academicSetupValidationSchema, "body"),
   createAcademicSetup
 );
@@ -109,7 +113,7 @@ router.post(
 router.post(
   "/my-school/class-setup",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(classSetupValidationSchema, "body"),
   createClassSetup
 );
@@ -118,7 +122,7 @@ router.post(
 router.post(
   "/my-school/subject-setup",
   protectRoutes,
-  authorize("LEADER", "VICE_LEADER", "ADMINISTRATOR"),
+  authorizeSchoolManagement,
   validate(subjectSetupValidationSchema, "body"),
   createSubjectSetup
 );

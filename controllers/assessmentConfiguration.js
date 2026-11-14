@@ -4,7 +4,6 @@ import { dbConnection } from "../config/db.js";
 
 import {
   School,
-  Owner,
   Class,
   Session,
   Term,
@@ -27,19 +26,6 @@ const VALID_SECTIONS = [
   "SENIOR_SECONDARY",
 ];
 
-const WRITE_ROLES = [
-  "LEADER",
-  "VICE_LEADER",
-  "EXAM_OFFICER",
-];
-
-const READ_ROLES = [
-  "LEADER",
-  "VICE_LEADER",
-  "ADMINISTRATOR",
-  "EXAM_OFFICER",
-];
-
 // ============================================================
 // ERROR HANDLING
 // ============================================================
@@ -52,48 +38,6 @@ const handleError = (error, req, next) =>
     "ASSESSMENT_CONFIGURATION_CONTROLLER_ERROR",
     "Unable to process the assessment configuration request. Please try again."
   );
-
-// ============================================================
-// AUTHORIZATION
-// ============================================================
-
-const assertAssessmentReadAccess = async (req) => {
-  const { id: userId, schoolId, role } = req.user || {};
-
-  if (!userId || !schoolId) {
-    throw new AppError(
-      "Authenticated school or user not found.",
-      401
-    );
-  }
-
-  if (READ_ROLES.includes(role)) {
-    return;
-  }
-
-  const owner = await Owner.findOne({
-    where: {
-      userId,
-      schoolId,
-    },
-  });
-
-  if (!owner) {
-    throw new AppError(
-      "You are not authorized to view assessment configurations.",
-      403
-    );
-  }
-};
-
-const assertAssessmentWriteAccess = (req) => {
-  if (!WRITE_ROLES.includes(req.user?.role)) {
-    throw new AppError(
-      "Only the Leader, Vice Leader, or Examination Officer can manage assessment rules.",
-      403
-    );
-  }
-};
 
 // ============================================================
 // COMMON HELPERS
@@ -328,8 +272,6 @@ export const getAssessmentSections = async (
   next
 ) => {
   try {
-    await assertAssessmentReadAccess(req);
-
     const schoolId = getSchoolId(req);
 
     // Retrieve only educational sections that actually have classes.
@@ -527,8 +469,6 @@ export const getAssessmentConfigurations = async (
   next
 ) => {
   try {
-    await assertAssessmentReadAccess(req);
-
     const schoolId = getSchoolId(req);
 
     const { educationSection } = req.query;
@@ -611,8 +551,6 @@ export const updateAssessmentConfiguration = async (
   let transaction;
 
   try {
-    assertAssessmentWriteAccess(req);
-
     const schoolId = getSchoolId(req);
     const updatedBy = req.user.id;
 
@@ -834,8 +772,6 @@ export const getAssessmentConfigurationHistory = async (
   next
 ) => {
   try {
-    await assertAssessmentReadAccess(req);
-
     const schoolId = getSchoolId(req);
 
     const { educationSection } = req.params;
